@@ -22,33 +22,16 @@ Las dependencias usan los paths canónicos v2 (`charm.land/...`), no los antiguo
 
 ```
 tui-editor/
-├── cmd/
-│   └── tui-editor/
-│       └── main.go
+├── cmd/tui-editor/        # composition root
 ├── internal/
-│   ├── adapters/
-│   │   ├── docker/
-│   │   │   └── doc.go
-│   │   ├── fs/
-│   │   │   └── doc.go
-│   │   └── git/
-│   │       └── doc.go
-│   ├── config/
-│   │   ├── config.go
-│   │   └── config_test.go
-│   ├── domain/
-│   │   └── doc.go
-│   ├── ports/
-│   │   └── doc.go
-│   ├── testutil/
-│   │   └── fakes/
-│   │       └── doc.go
+│   ├── adapters/          # fs, git, docker (F3+)
+│   ├── config/            # flags y validación
+│   ├── domain/            # tipos, límites y errores puros
+│   ├── ports/             # interfaces de servicios
+│   ├── testutil/fakes/    # dobles de test
 │   └── tui/
-│       ├── app/
-│       │   ├── model.go
-│       │   └── model_test.go
-│       └── components/
-│           └── doc.go
+│       ├── app/           # modelo raíz
+│       └── components/    # sub-modelos
 ├── .air.toml
 ├── .dockerignore
 ├── .gitignore
@@ -61,7 +44,7 @@ tui-editor/
 └── go.sum
 ```
 
-Los paquetes `domain`, `ports`, `adapters/*`, `tui/components` y `testutil/fakes` son esqueletos vacíos: solo fijan el boundary de cada capa.
+`domain` y `ports` son puros; `adapters` y `tui` se implementan por fases. La documentación de arquitectura se mantiene fuera del repositorio.
 
 ## Requisitos
 

@@ -12,6 +12,8 @@ COPY . .
 FROM base AS dev
 # git and openssh-client back the Git adapter; gcc and musl-dev let `make test-race` build the race detector.
 RUN apk add --no-cache git openssh-client gcc musl-dev
+# The bind-mounted /src is owned by the host user; allow git to read its metadata.
+RUN git config --system --add safe.directory /src
 RUN --mount=type=cache,target=/go/pkg/mod go install github.com/air-verse/air@v1.67.4
 CMD ["air", "-c", ".air.toml"]
 
