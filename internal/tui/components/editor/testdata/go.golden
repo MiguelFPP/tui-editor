@@ -1,0 +1,8 @@
+main.go · archivo · 8 líneas
+1 │ package main
+2 │
+3 │ import "fmt"
+4 │
+5 │ // Saluda imprime un saludo.
+6 │ func main() {
+7 │     fmt.Println("hola")
