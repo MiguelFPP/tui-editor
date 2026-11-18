@@ -29,6 +29,7 @@ func TestSentinelsAreUsableAndWellFormed(t *testing.T) {
 		"ErrMergeInProgress":   ErrMergeInProgress,
 		"ErrNoMergeInProgress": ErrNoMergeInProgress,
 		"ErrDockerUnavailable": ErrDockerUnavailable,
+		"ErrEditorUnavailable": ErrEditorUnavailable,
 	}
 
 	seen := make(map[error]string, len(sentinels))

@@ -18,7 +18,7 @@ var bindings = []binding{
 
 // helpLines renders the full keymap shown by the help overlay.
 func helpLines() []string {
-	lines := make([]string, 0, len(bindings)+4)
+	lines := make([]string, 0, len(bindings)+5)
 	lines = append(lines, styles.helpTitle.Render("tui-editor · atajos"))
 	lines = append(lines, "")
 
@@ -27,6 +27,7 @@ func helpLines() []string {
 	}
 
 	lines = append(lines, "")
+	lines = append(lines, "files: e edita el archivo, ctrl+s guarda y E abre el editor externo")
 	lines = append(lines, "git: 2 abre la pestaña; dentro, ? documenta cada sección y sus modales")
 
 	return lines

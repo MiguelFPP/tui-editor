@@ -2,7 +2,7 @@
 
 TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploración y edición rápida de archivos, control completo de Git y monitorización de contenedores Docker.
 
-Estado actual: **v0.2.0 (Git interactivo)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview y añade un panel Git completo: staging por archivo/hunk, commit, ramas, stash, merge y sincronización. La edición y el panel Docker llegan en fases posteriores.
+Estado actual: **v0.2.0 (Git interactivo y edición rápida)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview, edita y guarda archivos, lanza el editor externo y añade un panel Git completo: staging por archivo/hunk, commit, ramas, stash, merge y sincronización. El panel Docker llega en una fase posterior.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Las dependencias usan los paths canónicos v2 (`charm.land/...`), no los antiguo
 tui-editor/
 ├── cmd/tui-editor/        # composition root
 ├── internal/
-│   ├── adapters/          # fs y git (docker en F12)
+│   ├── adapters/          # fs, git y editor externo (docker en F12)
 │   ├── config/            # flags y validación
 │   ├── domain/            # tipos, límites y errores puros
 │   ├── ports/             # interfaces de servicios
@@ -84,8 +84,16 @@ El TUI necesita un TTY real: usa `docker compose run` (o los targets de arriba) 
 | `enter` / `espacio` | Alternar el directorio o abrir el archivo |
 | `/` | Filtrar por nombre o ruta |
 | `esc` | Limpiar el filtro |
+| `e` | Editar el archivo abierto en la TUI |
+| `ctrl+s` | Guardar el borrador |
+| `E` / `ctrl+e` | Abrir el archivo en el editor externo (`--editor`) |
+| `esc` (editando) | Volver al preview; con cambios sin guardar pide confirmación (`y` descarta, `n` cancela) |
 
 El clic izquierdo selecciona y el doble clic expande o abre. La rueda desplaza el panel bajo el cursor. El preview usa resaltado de sintaxis con Chroma, números de línea, scroll y detección de binarios y de tamaño.
+
+La edición rápida solo se abre en archivos de texto completos: los binarios, los truncados y los diffs se quedan en preview. `ctrl+s` escribe con el sello de la última lectura, así que un archivo cambiado en disco no se sobrescribe: el borrador se conserva y se avisa del conflicto. Con un borrador pendiente, `q` y `ctrl+c` avisan en lugar de salir, y elegir otro archivo no descarta los cambios.
+
+El editor externo se resuelve con `exec.LookPath` y se lanza sin shell, con la ruta absoluta del archivo: el binario de `--editor` tiene que existir en el entorno donde corre la TUI. Dentro del contenedor eso significa instalarlo en la imagen (igual que Git); si falta, la TUI muestra el error y sigue funcionando.
 
 ### Git
 
@@ -142,7 +150,7 @@ Cada fase ejecuta solo los paquetes que toca. La suite completa está reservada 
 | --- | --- | --- |
 | `--version` | — | Imprime `tui-editor 0.2.0` y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
-| `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo |
+| `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |
 | `--debug-log FILE` | vacío | Archivo de log de depuración |
 
@@ -154,7 +162,7 @@ docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version
 
 ## Alcance y limitaciones
 
-- Sin edición todavía: no se edita ni se guardan archivos; el preview es de consulta. La edición rápida y el editor externo llegan en F11.
+- Edición rápida: `e` edita el archivo abierto, `ctrl+s` guarda con detección de cambios externos y `E` abre el binario de `--editor`. Los binarios, los truncados y los diffs no se editan en la TUI.
 - Git interactivo: staging por archivo/hunk, commit, ramas, stash, merge, conflictos y sync.
 - Sin panel Docker: llega en una fase posterior y no se monta el socket por defecto.
 - Previews y listados acotados por tamaño y número de líneas; los binarios se detectan y no se renderizan.

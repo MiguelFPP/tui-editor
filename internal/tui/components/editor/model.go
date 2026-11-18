@@ -1,4 +1,5 @@
-// Package editor previews one file or one diff with syntax highlighting and scroll.
+// Package editor previews one file or one diff, with syntax highlighting, scroll and a quick
+// edit mode that saves through the file port.
 package editor
 
 import (
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -25,6 +27,7 @@ const (
 	tabWidth      = 4
 
 	loadTimeout = 5 * time.Second
+	saveTimeout = 10 * time.Second
 
 	gutterSeparator = " │ "
 	headerSeparator = " · "
@@ -74,14 +77,25 @@ func plainCells(style lipgloss.Style) lipgloss.Style {
 
 // Model is the editor/preview component; it never performs I/O outside a command.
 type Model struct {
-	files ports.FileService
-	path  domain.RelPath
-	mode  mode
-	diff  domain.Diff
+	files   ports.FileService
+	editors ports.EditorService
+	path    domain.RelPath
+	mode    mode
+	diff    domain.Diff
 
 	viewport viewport.Model
 	content  string
 	raw      string
+
+	area textarea.Model
+
+	editing        bool
+	dirty          bool
+	stamp          domain.FileStamp
+	saveErr        error
+	saving         bool
+	confirmDiscard bool
+	external       bool
 
 	err       error
 	loading   bool
@@ -92,17 +106,28 @@ type Model struct {
 }
 
 // New opens path in preview mode; the only read happens in Init.
-func New(files ports.FileService, path domain.RelPath) Model {
+func New(files ports.FileService, editors ports.EditorService, path domain.RelPath) Model {
 	m := Model{
 		files:    files,
+		editors:  editors,
 		path:     path,
 		mode:     modeFile,
 		viewport: viewport.New(),
+		area:     newArea(),
 		loading:  true,
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
 	return m
+}
+
+// newArea builds the draft editor of the quick edit mode.
+func newArea() textarea.Model {
+	area := textarea.New()
+	area.ShowLineNumbers = true
+	area.SetVirtualCursor(true)
+
+	return area
 }
 
 // NewDiff builds the diff preview from data already in memory, without I/O.
@@ -112,6 +137,7 @@ func NewDiff(d domain.Diff) Model {
 		mode:     modeDiff,
 		diff:     d,
 		viewport: viewport.New(),
+		area:     newArea(),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
@@ -127,14 +153,28 @@ func (m Model) Init() tea.Cmd {
 	return m.load(m.path)
 }
 
-// Loading reports whether the preview is still being read.
+// Loading reports whether the preview is still being read or a save is in flight.
 func (m Model) Loading() bool {
-	return m.loading
+	return m.loading || m.saving
 }
 
-// Err returns the read error of the open file, if any.
+// Err returns the last failure of the open file, if any.
 func (m Model) Err() error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+
 	return m.err
+}
+
+// CapturesInput reports that the draft owns the keyboard of the component.
+func (m Model) CapturesInput() bool {
+	return m.editing || m.confirmDiscard
+}
+
+// Dirty reports whether the draft holds changes that are not on disk yet.
+func (m Model) Dirty() bool {
+	return m.dirty
 }
 
 // Update applies one message; scrolling and resizing stay off the I/O path.
@@ -148,7 +188,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.applyPreview(msg)
 
 		return m, nil
-	case tea.KeyPressMsg, tea.MouseWheelMsg:
+	case savedMsg:
+		return m, m.applySaved(msg)
+	case externalReadyMsg:
+		return m, m.launchExternal(msg)
+	case externalDoneMsg:
+		return m, m.applyExternalDone(msg)
+	case tea.KeyPressMsg:
+		return m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		if m.editing {
+			return m, nil // the draft covers the preview
+		}
+
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 
@@ -158,20 +210,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 }
 
-// View renders the header plus either a state message or the viewport body.
+// View renders the header plus the body: the draft, a state line or the preview.
 func (m Model) View() string {
 	lines := []string{m.header()}
 
-	if state, ok := m.stateLine(); ok {
-		lines = append(lines, state)
-	} else {
+	switch {
+	case m.editing:
+		lines = append(lines, m.draftBody())
+	default:
+		if state, ok := m.stateLine(); ok {
+			lines = append(lines, state)
+
+			break
+		}
+		if m.saveErr != nil {
+			lines = append(lines, styles.fail.Render("error: "+describeError(m.saveErr)))
+		}
+
 		lines = append(lines, m.viewport.View())
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-// SetSize resizes the viewport and keeps the scroll position the content allows.
+// SetSize resizes the draft and the viewport, and keeps the scroll position the content allows.
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = max(width, 0), max(height, 0)
 
@@ -179,6 +241,8 @@ func (m *Model) SetSize(width, height int) {
 
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(m.bodyHeight())
+	m.area.SetWidth(m.width)
+	m.area.SetHeight(m.bodyHeight())
 	m.sync()
 
 	m.viewport.SetYOffset(offset)
@@ -222,9 +286,17 @@ func (m *Model) applyPreview(msg previewLoadedMsg) {
 
 	m.err = nil
 	m.truncated = msg.content.Truncated
+	m.stamp = msg.content.Stamp
 	m.raw = msg.content.Text
 	m.content = trimFinalNewline(Highlight(m.path, m.raw))
+	m.syncDraft()
 	m.sync()
+}
+
+// syncDraft mirrors the file on disk into the draft and drops the previous draft.
+func (m *Model) syncDraft() {
+	m.area.SetValue(m.raw)
+	m.dirty = false
 }
 
 // sync rebuilds the rendered body and pushes it into the viewport.
@@ -284,14 +356,35 @@ func (m Model) headerParts() []string {
 		return parts
 	}
 
+	if m.saveErr != nil {
+		parts = append(parts, "error")
+	}
+	if m.editing {
+		parts = append(parts, "editando")
+	}
+	if m.dirty {
+		parts = append(parts, "sin guardar")
+	}
+	if m.external {
+		parts = append(parts, "editor externo")
+	}
 	if m.err == nil && !m.loading {
-		parts = append(parts, countLabel(lineCount(m.content)))
+		parts = append(parts, countLabel(lineCount(m.bodySource())))
 	}
 	if m.truncated {
 		parts = append(parts, "truncado")
 	}
 
 	return parts
+}
+
+// bodySource counts the lines of what is on screen: the draft while editing, the preview otherwise.
+func (m Model) bodySource() string {
+	if m.editing {
+		return trimFinalNewline(m.area.Value())
+	}
+
+	return m.content
 }
 
 func (m Model) pathLabel() string {
@@ -322,10 +415,18 @@ func (m Model) bodyHeight() int {
 
 func describeError(err error) string {
 	switch {
+	case errors.Is(err, errNoService):
+		return "servicio de archivos no configurado"
+	case errors.Is(err, errNoEditor):
+		return "servicio de editor no configurado"
 	case errors.Is(err, domain.ErrBinary):
 		return "archivo binario"
 	case errors.Is(err, domain.ErrTooLarge):
 		return "demasiado grande"
+	case errors.Is(err, domain.ErrConflict):
+		return "el archivo cambió en disco"
+	case errors.Is(err, domain.ErrEditorUnavailable):
+		return "el editor externo no está disponible"
 	case errors.Is(err, domain.ErrPermissionDenied):
 		return "permiso denegado"
 	case errors.Is(err, domain.ErrNotFound):

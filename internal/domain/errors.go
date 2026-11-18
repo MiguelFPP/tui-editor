@@ -24,4 +24,5 @@ var (
 	ErrMergeInProgress   = errors.New("hay un merge en curso")
 	ErrNoMergeInProgress = errors.New("no hay ningún merge en curso")
 	ErrDockerUnavailable = errors.New("docker no está disponible")
+	ErrEditorUnavailable = errors.New("el editor externo no está disponible")
 )

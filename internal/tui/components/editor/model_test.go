@@ -88,11 +88,21 @@ func filesFake(t *testing.T) *fakes.FileService {
 	return files
 }
 
+// editorsFake resolves the editor command without touching the PATH of the host.
+func editorsFake() *fakes.EditorService {
+	editors := fakes.NewEditorService()
+	editors.OnResolve = func(_ context.Context, target domain.EditorTarget) (domain.EditorCommand, error) {
+		return domain.EditorCommand{Binary: "vim", Args: []string{target.Path.String()}}, nil
+	}
+
+	return editors
+}
+
 // open runs Init, feeds its message back and returns the loaded model.
 func open(t *testing.T, path domain.RelPath, width, height int) Model {
 	t.Helper()
 
-	m := New(filesFake(t), path)
+	m := New(filesFake(t), editorsFake(), path)
 	m.SetSize(width, height)
 
 	cmd := m.Init()
@@ -174,7 +184,7 @@ func checkGolden(t *testing.T, name, got string) {
 
 func TestPreviewLoadsFileThroughThePort(t *testing.T) {
 	files := filesFake(t)
-	m := New(files, "main.go")
+	m := New(files, editorsFake(), "main.go")
 	m.SetSize(goldenWidth, 10)
 
 	if !m.loading {
@@ -400,7 +410,7 @@ func TestPreviewErrorStates(t *testing.T) {
 }
 
 func TestPreviewMissingServiceReportsAnError(t *testing.T) {
-	m := New(nil, "main.go")
+	m := New(nil, nil, "main.go")
 	m.SetSize(goldenWidth, goldenHeight)
 
 	cmd := m.Init()
@@ -449,7 +459,7 @@ func TestPreviewTruncatedFileIsMarked(t *testing.T) {
 }
 
 func TestPreviewIgnoresResultsOfAnotherPath(t *testing.T) {
-	m := New(filesFake(t), "main.go")
+	m := New(filesFake(t), editorsFake(), "main.go")
 	m.SetSize(goldenWidth, goldenHeight)
 
 	next, cmd := m.Update(previewLoadedMsg{path: "notes.xyz", content: domain.FileContent{Path: "notes.xyz", Text: unknownSource}})
@@ -652,7 +662,7 @@ func TestLexerForMatchesPathThenContent(t *testing.T) {
 }
 
 func TestLoadingAndErrReportTheReadState(t *testing.T) {
-	pending := New(filesFake(t), "main.go")
+	pending := New(filesFake(t), editorsFake(), "main.go")
 	if !pending.Loading() {
 		t.Error("Loading() = false before Init, want true")
 	}

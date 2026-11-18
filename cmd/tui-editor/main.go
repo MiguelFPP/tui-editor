@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MiguelFPP/tui-editor/internal/adapters/editor"
 	"github.com/MiguelFPP/tui-editor/internal/adapters/fs"
 	"github.com/MiguelFPP/tui-editor/internal/adapters/git"
 	"github.com/MiguelFPP/tui-editor/internal/config"
@@ -55,7 +56,12 @@ func run() error {
 		return fmt.Errorf("construir el servicio de git: %w", err)
 	}
 
-	program := tea.NewProgram(app.New(app.Deps{Config: cfg, Files: files, Git: gitSvc}))
+	editorSvc, err := editor.New(root, cfg.Editor)
+	if err != nil {
+		return fmt.Errorf("construir el servicio de editor: %w", err)
+	}
+
+	program := tea.NewProgram(app.New(app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc}))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("ejecutar la TUI: %w", err)
 	}

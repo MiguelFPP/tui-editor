@@ -149,7 +149,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case " ", "space":
 		m.toggleHunk()
 	case "r":
-		return m.refresh()
+		return m.Refresh()
 	case "esc":
 		m.back()
 	case "?":
@@ -257,8 +257,8 @@ func (m *Model) toggleStaged() tea.Cmd {
 	return m.loadDiff(m.request.Path)
 }
 
-// refresh reads the status and the branches again, plus whatever is already loaded.
-func (m *Model) refresh() tea.Cmd {
+// Refresh reads the status and the branches again, plus whatever is already loaded.
+func (m *Model) Refresh() tea.Cmd {
 	commands := make([]tea.Cmd, 0, 5)
 
 	m.writeErr = nil // an explicit refresh clears the failure of the last write

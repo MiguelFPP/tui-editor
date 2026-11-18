@@ -32,6 +32,9 @@ const (
 	minEditorBox = 20
 
 	toastTTL = 3 * time.Second
+
+	// dirtyDraft is the notice shown when an action would drop an unsaved draft.
+	dirtyDraft = "cambios sin guardar en el editor"
 )
 
 // Tab is one top-level section of the TUI.
@@ -64,12 +67,14 @@ type Deps struct {
 	Config config.Config
 	Files  ports.FileService
 	Git    ports.GitService
+	Editor ports.EditorService
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
 type Model struct {
-	cfg   config.Config
-	files ports.FileService
+	cfg     config.Config
+	files   ports.FileService
+	editors ports.EditorService
 
 	tree      filetree.Model
 	editor    editor.Model
@@ -106,6 +111,7 @@ func New(deps Deps) Model {
 	m := Model{
 		cfg:      deps.Config,
 		files:    deps.Files,
+		editors:  deps.Editor,
 		tree:     filetree.New(deps.Files, ""),
 		git:      gitpanel.New(deps.Git),
 		tab:      FilesTab,
@@ -157,7 +163,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 	case filetree.FileChosenMsg:
-		cmds = append(cmds, m.openFile(msg.Path))
+		if m.editorDirty() {
+			cmds = append(cmds, m.notify(dirtyDraft))
+		} else {
+			cmds = append(cmds, m.openFile(msg.Path))
+		}
+	case editor.FileChangedMsg:
+		// The editor already reloaded the file: the panel only has to catch up with Git.
+		cmds = append(cmds, m.git.Refresh())
 	default:
 		cmds = append(cmds, m.fanOut(msg))
 	}
@@ -212,7 +225,7 @@ func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
 
 // openFile replaces the preview with path, focuses it and loads it.
 func (m *Model) openFile(path domain.RelPath) tea.Cmd {
-	m.editor = editor.New(m.files, path)
+	m.editor = editor.New(m.files, m.editors, path)
 	m.hasEditor = true
 	m.tab = FilesTab
 	m.focus = FocusEditor
@@ -228,7 +241,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if m.help {
 		switch key {
 		case "q", "ctrl+c":
-			return tea.Quit, true
+			return m.quit()
 		case "?", "esc":
 			m.help = false
 		}
@@ -236,10 +249,19 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 
+	// The draft of the Files tab owns every key but ctrl+c, which never drops unsaved changes.
+	if m.tab == FilesTab && m.hasEditor && m.editor.CapturesInput() {
+		if key != "ctrl+c" {
+			return m.forwardKey(msg), false
+		}
+
+		return m.quit()
+	}
+
 	// A modal inside the Git panel owns every key but the quit shortcut.
 	if m.tab == GitTab && m.git.CapturesInput() {
 		if key == "ctrl+c" {
-			return tea.Quit, true
+			return m.quit()
 		}
 
 		return m.forwardKey(msg), false
@@ -247,7 +269,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	switch key {
 	case "q", "ctrl+c":
-		return tea.Quit, true
+		return m.quit()
 	case "?":
 		m.help = true
 
@@ -395,6 +417,29 @@ func (m *Model) toggleFocus() {
 	}
 
 	m.focus = FocusEditor
+}
+
+// editorDirty reports whether the open file holds a draft that is not on disk yet.
+func (m Model) editorDirty() bool {
+	return m.hasEditor && m.editor.Dirty()
+}
+
+// quit leaves the program, unless a draft would be lost.
+func (m *Model) quit() (tea.Cmd, bool) {
+	if m.editorDirty() {
+		return m.notify(dirtyDraft), false
+	}
+
+	return tea.Quit, true
+}
+
+// notify shows a toast that does not come from a panel error.
+func (m *Model) notify(text string) tea.Cmd {
+	m.toast = toastPrefix + text
+	m.toastSeq++
+	seq := m.toastSeq
+
+	return tea.Tick(toastTTL, func(time.Time) tea.Msg { return toastExpiredMsg{seq: seq} })
 }
 
 // afterUpdate reconciles the toast and keeps exactly one spinner tick in flight.

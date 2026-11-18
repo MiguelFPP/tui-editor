@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -47,6 +48,9 @@ func testDeps(t *testing.T) Deps {
 
 		return domain.FileContent{Path: path, Text: "package main\n"}, nil
 	}
+	files.OnWriteFile = func(_ context.Context, _ domain.RelPath, content string, _ domain.FileStamp) (domain.FileStamp, error) {
+		return domain.FileStamp{Size: int64(len(content)), ModTime: time.Now()}, nil
+	}
 
 	git := fakes.NewGitService()
 	git.OnStatus = func(context.Context) (domain.GitStatus, error) {
@@ -56,7 +60,12 @@ func testDeps(t *testing.T) Deps {
 		return []domain.Branch{{Name: "main", Current: true}}, nil
 	}
 
-	return Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git}
+	editors := fakes.NewEditorService()
+	editors.OnResolve = func(_ context.Context, target domain.EditorTarget) (domain.EditorCommand, error) {
+		return domain.EditorCommand{Binary: "vim", Args: []string{target.Path.String()}}, nil
+	}
+
+	return Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git, Editor: editors}
 }
 
 func newSized(t *testing.T, deps Deps, width, height int) Model {
