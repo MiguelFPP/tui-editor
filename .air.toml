@@ -1,0 +1,16 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/tui-fer-editor ./cmd/tui-fer-editor"
+bin = "./tmp/tui-fer-editor"
+include_ext = ["go"]
+exclude_dir = ["tmp", "vendor"]
+delay = 300
+stop_on_error = true
+
+[log]
+time = true
+
+[misc]
+clean_on_exit = true

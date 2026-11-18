@@ -1,0 +1,9 @@
+.git
+.gitignore
+tmp
+bin
+*.log
+.env
+README.md
+compose.yaml
+Makefile

@@ -1,0 +1,35 @@
+name: tui-fer-editor
+
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    image: tui-fer-editor:dev
+    init: true
+    stdin_open: true
+    tty: true
+    working_dir: /src
+    environment:
+      TERM: ${TERM:-xterm-256color}
+    volumes:
+      - .:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    command: ["air", "-c", ".air.toml"]
+
+  app:
+    profiles: ["prod"]
+    build:
+      context: .
+      target: runtime
+    image: tui-fer-editor:latest
+    init: true
+    stdin_open: true
+    tty: true
+    environment:
+      TERM: ${TERM:-xterm-256color}
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
