@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	charm.land/bubbletea/v2 v2.1.2
 	charm.land/lipgloss/v2 v2.1.1
+	github.com/bmatcuk/doublestar/v4 v4.10.4
 )
 
 require (
