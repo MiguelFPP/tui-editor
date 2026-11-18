@@ -70,13 +70,6 @@ type GitWriter interface {
 	GitSyncWriter
 }
 
-// GitChanges is the port the commit flow needs: read the working tree and stage and commit it.
-type GitChanges interface {
-	GitReader
-	GitStager
-	GitCommitter
-}
-
 // GitService is the full Git port consumed by the Git panel.
 type GitService interface {
 	GitReader

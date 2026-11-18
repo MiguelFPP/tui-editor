@@ -63,7 +63,7 @@ const (
 type Deps struct {
 	Config config.Config
 	Files  ports.FileService
-	Git    ports.GitChanges
+	Git    ports.GitService
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.

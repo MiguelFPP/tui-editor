@@ -100,7 +100,7 @@ func answers(t *testing.T, m Model, cmd tea.Cmd) Model {
 
 func panelMessage(msg tea.Msg) bool {
 	switch msg.(type) {
-	case statusLoadedMsg, branchesLoadedMsg, historyLoadedMsg, diffLoadedMsg, writeDoneMsg:
+	case statusLoadedMsg, branchesLoadedMsg, stashesLoadedMsg, historyLoadedMsg, diffLoadedMsg, writeDoneMsg:
 		return true
 	default:
 		return false
@@ -329,6 +329,21 @@ func press(t *testing.T, m Model, msg tea.KeyPressMsg) Model {
 	return loadAll(t, next, cmd)
 }
 
+// goTo moves the panel to one section with the tab key, loading what is read on demand.
+func goTo(t *testing.T, m Model, section Section) Model {
+	t.Helper()
+
+	for steps := 0; m.Section() != section; steps++ {
+		if steps > sectionCount {
+			t.Fatalf("Section() = %v, want %v", m.Section(), section)
+		}
+
+		m = press(t, m, key(tea.KeyTab))
+	}
+
+	return m
+}
+
 func TestNewLoadsStatusAndBranchesOnInit(t *testing.T) {
 	git := gitFake(t)
 	m := New(git)
@@ -355,6 +370,9 @@ func TestNewLoadsStatusAndBranchesOnInit(t *testing.T) {
 	if got := git.CallCount("Commits"); got != 0 {
 		t.Errorf("Commits calls = %d, want 0: the history is lazy", got)
 	}
+	if got := git.CallCount("Stashes"); got != 0 {
+		t.Errorf("Stashes calls = %d, want 0: the stash list is lazy", got)
+	}
 	if m.loading.status || m.loading.branches {
 		t.Errorf("loading = %+v, want both loaded", m.loading)
 	}
@@ -362,7 +380,7 @@ func TestNewLoadsStatusAndBranchesOnInit(t *testing.T) {
 	view := plain(m.View())
 	for _, want := range []string{
 		"git · rama main · origin/main · ↑2 · ↓1 · 5 cambios",
-		"Cambios │ Diff │ Ramas │ Historial",
+		"Cambios │ Diff │ Ramas │ Stash │ Historial",
 		"tab: sección",
 	} {
 		if !strings.Contains(view, want) {
@@ -421,7 +439,7 @@ func TestCursorNavigationAndSections(t *testing.T) {
 		t.Errorf("View() = %q, want the empty diff state", got)
 	}
 
-	for _, section := range []Section{Branches, History} {
+	for _, section := range []Section{Branches, Stash, History} {
 		m = press(t, m, key(tea.KeyTab))
 		if m.Section() != section {
 			t.Fatalf("after tab Section() = %v, want %v", m.Section(), section)
@@ -450,9 +468,7 @@ func TestHistoryLoadsLazilyWithTheDefaultLimit(t *testing.T) {
 		t.Fatalf("Commits calls = %d, want 0", got)
 	}
 
-	m = press(t, m, key(tea.KeyTab))
-	m = press(t, m, key(tea.KeyTab))
-	m = press(t, m, key(tea.KeyTab))
+	m = goTo(t, m, History)
 
 	if m.Section() != History {
 		t.Fatalf("Section() = %v, want %v", m.Section(), History)
@@ -472,8 +488,8 @@ func TestHistoryLoadsLazilyWithTheDefaultLimit(t *testing.T) {
 	}
 
 	// Leaving and coming back does not reload an already loaded page.
-	m = press(t, m, key(tea.KeyTab))
-	m = press(t, m, key(tea.KeyTab))
+	m = goTo(t, m, Changes)
+	m = goTo(t, m, History)
 	if got := git.CallCount("Commits"); got != 1 {
 		t.Errorf("Commits calls = %d, want 1: the page is cached", got)
 	}
@@ -556,9 +572,7 @@ func TestRefreshReloadsEverythingLoaded(t *testing.T) {
 
 	m = press(t, m, key(tea.KeyDown))
 	m = press(t, m, key(tea.KeyEnter))
-	m = press(t, m, key(tea.KeyTab))
-	m = press(t, m, key(tea.KeyTab))
-	m = press(t, m, key(tea.KeyTab))
+	m = goTo(t, m, History)
 
 	before := map[string]int{
 		"Status":   git.CallCount("Status"),
@@ -688,10 +702,7 @@ func TestStatesWhenThereIsNothingToShow(t *testing.T) {
 			return domain.CommitPage{}, nil
 		}
 
-		m := open(t, git)
-		for range 3 {
-			m = press(t, m, key(tea.KeyTab))
-		}
+		m := goTo(t, open(t, git), History)
 
 		if view := plain(m.View()); !strings.Contains(view, "sin commits") {
 			t.Errorf("View() = %q, want the empty history state", view)
@@ -873,8 +884,8 @@ func TestUpdateIgnoresUnrelatedMessages(t *testing.T) {
 }
 
 func TestSectionLabels(t *testing.T) {
-	labels := []string{Changes.String(), Diff.String(), Branches.String(), History.String()}
-	if want := []string{"Cambios", "Diff", "Ramas", "Historial"}; !slices.Equal(labels, want) {
+	labels := []string{Changes.String(), Diff.String(), Branches.String(), Stash.String(), History.String()}
+	if want := []string{"Cambios", "Diff", "Ramas", "Stash", "Historial"}; !slices.Equal(labels, want) {
 		t.Errorf("labels = %v, want %v", labels, want)
 	}
 	if got := Section(9).String(); got != "Cambios" {

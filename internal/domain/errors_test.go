@@ -21,6 +21,13 @@ func TestSentinelsAreUsableAndWellFormed(t *testing.T) {
 		"ErrNoChanges":         ErrNoChanges,
 		"ErrGitUnavailable":    ErrGitUnavailable,
 		"ErrNoRemote":          ErrNoRemote,
+		"ErrDirtyWorktree":     ErrDirtyWorktree,
+		"ErrNoUpstream":        ErrNoUpstream,
+		"ErrNonFastForward":    ErrNonFastForward,
+		"ErrAuthRequired":      ErrAuthRequired,
+		"ErrRemoteUnreachable": ErrRemoteUnreachable,
+		"ErrMergeInProgress":   ErrMergeInProgress,
+		"ErrNoMergeInProgress": ErrNoMergeInProgress,
 		"ErrDockerUnavailable": ErrDockerUnavailable,
 	}
 

@@ -572,6 +572,43 @@ func TestGitCommitModalOwnsTheKeyboard(t *testing.T) {
 	}
 }
 
+func TestGitPromptOwnsTheKeyboard(t *testing.T) {
+	deps := testDeps(t)
+	m := newSized(t, deps, 120, 40)
+	m = drain(t, m, m.Init())
+	m = update(t, m, typed('2'))
+	m = update(t, m, key(tea.KeyTab))
+	m = update(t, m, key(tea.KeyTab))
+
+	model, cmd := press(t, m, typed('n'))
+	if cmd == nil {
+		t.Fatal("no command, want the focus of the prompt")
+	}
+	if !model.git.CapturesInput() {
+		t.Fatal("CapturesInput() = false after n, want the prompt open")
+	}
+
+	// q, 1 and ? must reach the prompt instead of the root keymap.
+	for _, msg := range []tea.KeyPressMsg{typed('q'), typed('1'), typed('?'), typed('2')} {
+		model, _ = press(t, model, msg)
+	}
+	if model.Tab() != GitTab || model.HelpVisible() {
+		t.Errorf("tab = %v, help = %v, want the Git tab and no help", model.Tab(), model.HelpVisible())
+	}
+	if !model.git.CapturesInput() {
+		t.Error("CapturesInput() = false, want the prompt kept open")
+	}
+	if got := model.git.Err(); got != nil {
+		t.Errorf("Err() = %v, want no error from typing", got)
+	}
+
+	if _, quit := press(t, model, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); quit == nil {
+		t.Fatal("no command, want quit")
+	} else if _, ok := quit().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", quit())
+	}
+}
+
 func TestGitStageAndCommitThroughTheRoot(t *testing.T) {
 	deps := testDeps(t)
 	git := stagedGit(t, deps)

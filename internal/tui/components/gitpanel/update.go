@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -20,6 +21,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.applyStatus(msg)
 	case branchesLoadedMsg:
 		m.applyBranches(msg)
+	case stashesLoadedMsg:
+		m.applyStashes(msg)
 	case historyLoadedMsg:
 		m.applyHistory(msg)
 	case diffLoadedMsg:
@@ -31,9 +34,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		m.handleWheel(msg.Mouse())
 	default:
-		// The commit editor gets everything the panel does not own, like its cursor blink.
+		// The modals get everything the panel does not own, like their cursor blink.
 		if m.commit.open {
 			return m, m.updateCommit(msg)
+		}
+		if m.prompt.open {
+			return m, m.updatePrompt(msg)
 		}
 	}
 
@@ -55,9 +61,14 @@ func (m *Model) handleWheel(ev tea.Mouse) {
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
 }
 
-// handleKey routes the keyboard of F5 first, plus the staging keys of F7.
+// handleKey routes the keyboard of the open modal first, then the sections.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	if m.commit.open {
+	switch {
+	case m.confirm.open:
+		return m.handleConfirmKey(msg)
+	case m.prompt.open:
+		return m.handlePromptKey(msg)
+	case m.commit.open:
 		return m.handleCommitKey(msg)
 	}
 
@@ -80,6 +91,26 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.unstageKey()
 	case "c":
 		return m.openCommit()
+	case "n":
+		return m.openNewBranch()
+	case "x":
+		return m.destructiveKey()
+	case "m":
+		return m.mergeKey()
+	case "z":
+		return m.stashKey()
+	case "o":
+		return m.resolveKey(domain.Ours)
+	case "t":
+		return m.resolveKey(domain.Theirs)
+	case "A":
+		return m.openAbortMerge()
+	case "f":
+		return m.fetchKey()
+	case "p":
+		return m.pullKey()
+	case "P":
+		return m.pushKey()
 	case "[":
 		m.moveHunk(-1)
 	case "]":
@@ -115,15 +146,24 @@ func (m *Model) unstageKey() tea.Cmd {
 	return m.unstageFile()
 }
 
-// goSection moves the focus and loads the history the first time it is shown.
+// goSection moves the focus and loads the sections that are read on demand.
 func (m *Model) goSection(delta int) tea.Cmd {
 	m.section = Section((int(m.section) + delta + sectionCount) % sectionCount)
 	m.clamp(m.section)
 
-	if m.section == History && !m.historyLoaded {
-		m.historyLoaded = true
+	switch m.section {
+	case Stash:
+		if !m.stashesLoaded {
+			m.stashesLoaded = true
 
-		return m.reloadHistory()
+			return m.reloadStashes()
+		}
+	case History:
+		if !m.historyLoaded {
+			m.historyLoaded = true
+
+			return m.reloadHistory()
+		}
 	}
 
 	return nil
@@ -139,18 +179,36 @@ func (m *Model) moveCursor(delta int) {
 	m.scrollToCursor(m.section)
 }
 
-// activate loads the diff of the selected file; F5 does not open a commit yet.
+// activate opens the diff of the selected file, checks out the selected branch, or applies the
+// selected stash.
 func (m *Model) activate() tea.Cmd {
-	if m.section != Changes {
+	switch m.section {
+	case Changes:
+		file, ok := m.selectedFile()
+		if !ok {
+			return nil
+		}
+
+		return m.loadDiff(file.Path)
+	case Branches:
+		return m.checkoutKey()
+	case Stash:
+		return m.stashApplyKey()
+	default:
 		return nil
 	}
+}
 
-	file, ok := m.selectedFile()
-	if !ok {
+// destructiveKey asks for confirmation before removing the selected branch or stash.
+func (m *Model) destructiveKey() tea.Cmd {
+	switch m.section {
+	case Branches:
+		return m.openDeleteBranch()
+	case Stash:
+		return m.openStashDrop()
+	default:
 		return nil
 	}
-
-	return m.loadDiff(file.Path)
 }
 
 // toggleStaged switches between the worktree and the index, reloading the diff in place.
@@ -165,7 +223,7 @@ func (m *Model) toggleStaged() tea.Cmd {
 
 // refresh reads the status and the branches again, plus whatever is already loaded.
 func (m *Model) refresh() tea.Cmd {
-	commands := make([]tea.Cmd, 0, 4)
+	commands := make([]tea.Cmd, 0, 5)
 
 	m.seqs.status++
 	m.loading.status = true
@@ -177,6 +235,9 @@ func (m *Model) refresh() tea.Cmd {
 
 	if m.historyLoaded {
 		commands = append(commands, m.reloadHistory())
+	}
+	if m.stashesLoaded {
+		commands = append(commands, m.reloadStashes())
 	}
 	if m.loaded {
 		commands = append(commands, m.loadDiff(m.request.Path))
@@ -191,7 +252,7 @@ func (m *Model) refreshAfterWrite(forceHistory bool) tea.Cmd {
 		return nil
 	}
 
-	commands := make([]tea.Cmd, 0, 4)
+	commands := make([]tea.Cmd, 0, 5)
 
 	m.seqs.status++
 	m.loading.status = true
@@ -210,15 +271,35 @@ func (m *Model) refreshAfterWrite(forceHistory bool) tea.Cmd {
 		m.historyLoaded = true
 		commands = append(commands, m.reloadHistory())
 	}
+	if m.stashesLoaded {
+		commands = append(commands, m.reloadStashes())
+	}
 
 	return tea.Batch(commands...)
 }
 
 // beginWrite marks the panel as writing and returns the command that performs it.
-func (m *Model) beginWrite(op string, run func(context.Context, ports.GitChanges) error) tea.Cmd {
+func (m *Model) beginWrite(op string, run func(context.Context, ports.GitService) error) tea.Cmd {
+	return m.startWrite(op, func(ctx context.Context, git ports.GitService) (string, error) {
+		return "", run(ctx, git)
+	})
+}
+
+// beginWriteNotice runs a write that also reports what to show once it succeeds.
+func (m *Model) beginWriteNotice(op string, run func(context.Context, ports.GitService) (string, error)) tea.Cmd {
+	return m.startWrite(op, run)
+}
+
+// startWrite serialises the writes of the panel: one at a time, the rest are ignored.
+func (m *Model) startWrite(op string, run func(context.Context, ports.GitService) (string, error)) tea.Cmd {
+	if m.writing {
+		return nil
+	}
+
 	m.seqs.write++
 	m.writing = true
 	m.writeErr = nil
+	m.notice = ""
 
 	return writeCmd(m.git, m.seqs.write, op, run)
 }
@@ -232,22 +313,40 @@ func (m *Model) applyWriteDone(msg writeDoneMsg) tea.Cmd {
 	m.writing = false
 	m.writeErr = msg.err
 	if msg.err != nil {
-		if msg.op == opCommit {
-			m.commit.err = msg.err
-		}
+		m.showWriteFailure(msg.op, msg.err)
 
 		return nil // a failed write changed nothing, so there is nothing to reload
 	}
 
-	if msg.op == opCommit {
-		m.commit.err = nil
+	m.notice = msg.notice
+	m.closeModals()
+	m.resetHunks()
+
+	return m.refreshAfterWrite(forcesHistory(msg.op))
+}
+
+// showWriteFailure mirrors the failure in the modal that started the write.
+func (m *Model) showWriteFailure(op string, err error) {
+	switch {
+	case op == opCommit && m.commit.open:
+		m.commit.err = err
+	case m.prompt.open:
+		m.prompt.err = err
+	case m.confirm.open:
+		m.confirm.err = err
+	}
+}
+
+// closeModals closes the modals a successful write finishes.
+func (m *Model) closeModals() {
+	if m.commit.open {
 		m.commit.open = false
+		m.commit.err = nil
 		m.commit.area.SetValue("")
 	}
 
-	m.resetHunks()
-
-	return m.refreshAfterWrite(msg.op == opCommit)
+	m.cancelPrompt()
+	m.confirm = confirmModal{}
 }
 
 // stageFile stages the selected entry, including the pre-image of a rename.
@@ -257,7 +356,7 @@ func (m *Model) stageFile() tea.Cmd {
 		return nil
 	}
 
-	return m.beginWrite(opStage, func(ctx context.Context, git ports.GitChanges) error {
+	return m.beginWrite(opStage, func(ctx context.Context, git ports.GitService) error {
 		return git.Stage(ctx, paths)
 	})
 }
@@ -269,7 +368,7 @@ func (m *Model) unstageFile() tea.Cmd {
 		return nil
 	}
 
-	return m.beginWrite(opUnstage, func(ctx context.Context, git ports.GitChanges) error {
+	return m.beginWrite(opUnstage, func(ctx context.Context, git ports.GitService) error {
 		return git.Unstage(ctx, paths)
 	})
 }
@@ -327,12 +426,179 @@ func (m *Model) applyHunks(stage bool) tea.Cmd {
 		op = opStageHunks
 	}
 
-	return m.beginWrite(op, func(ctx context.Context, git ports.GitChanges) error {
+	return m.beginWrite(op, func(ctx context.Context, git ports.GitService) error {
 		if stage {
 			return git.StageHunks(ctx, diff, hunks)
 		}
 
 		return git.UnstageHunks(ctx, diff, hunks)
+	})
+}
+
+// checkoutKey switches to the selected branch.
+func (m *Model) checkoutKey() tea.Cmd {
+	branch, ok := m.selectedBranch()
+	if !ok || branch.Current {
+		return nil
+	}
+
+	name := branch.Name
+
+	return m.beginWrite(opCheckout, func(ctx context.Context, git ports.GitService) error {
+		return git.Checkout(ctx, name)
+	})
+}
+
+// openNewBranch asks for the name and the optional start point of a new branch.
+func (m *Model) openNewBranch() tea.Cmd {
+	if m.section != Branches || m.git == nil {
+		return nil
+	}
+
+	return m.openPrompt(promptNewBranch)
+}
+
+// openPrompt shows the one-line prompt of one kind.
+func (m *Model) openPrompt(kind promptKind) tea.Cmd {
+	m.prompt = newPromptModal(kind, m.width)
+	m.prompt.open = true
+
+	return m.prompt.input.Focus()
+}
+
+// openDeleteBranch asks for confirmation before deleting the selected branch, never by force.
+func (m *Model) openDeleteBranch() tea.Cmd {
+	branch, ok := m.selectedBranch()
+	if !ok || branch.Current {
+		return nil
+	}
+
+	m.confirm = confirmModal{open: true, kind: confirmDeleteBranch, branch: branch.Name}
+
+	return nil
+}
+
+// mergeKey merges the selected branch into the current one.
+func (m *Model) mergeKey() tea.Cmd {
+	if m.section != Branches {
+		return nil
+	}
+
+	branch, ok := m.selectedBranch()
+	if !ok || branch.Current {
+		return nil
+	}
+
+	name := branch.Name
+
+	return m.beginWriteNotice(opMerge, func(ctx context.Context, git ports.GitService) (string, error) {
+		result, err := git.Merge(ctx, name)
+
+		return mergeNotice(result), err
+	})
+}
+
+// stashKey asks for the message of a new stash, or pops the selected entry.
+func (m *Model) stashKey() tea.Cmd {
+	switch m.section {
+	case Changes:
+		if m.git == nil {
+			return nil
+		}
+
+		return m.openPrompt(promptStashMessage)
+	case Stash:
+		return m.stashPopKey()
+	default:
+		return nil
+	}
+}
+
+// stashApplyKey restores the selected entry and keeps it in the list.
+func (m *Model) stashApplyKey() tea.Cmd {
+	index, ok := m.selectedStashIndex()
+	if !ok {
+		return nil
+	}
+
+	return m.beginWrite(opStashApply, func(ctx context.Context, git ports.GitService) error {
+		return git.StashApply(ctx, index)
+	})
+}
+
+// stashPopKey restores the selected entry and drops it when nothing conflicts.
+func (m *Model) stashPopKey() tea.Cmd {
+	index, ok := m.selectedStashIndex()
+	if !ok {
+		return nil
+	}
+
+	return m.beginWrite(opStashPop, func(ctx context.Context, git ports.GitService) error {
+		return git.StashPop(ctx, index)
+	})
+}
+
+// openStashDrop asks for confirmation before dropping the selected entry.
+func (m *Model) openStashDrop() tea.Cmd {
+	index, ok := m.selectedStashIndex()
+	if !ok {
+		return nil
+	}
+
+	m.confirm = confirmModal{open: true, kind: confirmStashDrop, index: index}
+
+	return nil
+}
+
+// resolveKey stages one side of the selected conflicted file; nothing is resolved automatically.
+func (m *Model) resolveKey(resolution domain.Resolution) tea.Cmd {
+	if m.section != Changes {
+		return nil
+	}
+
+	file, ok := m.selectedFile()
+	if !ok || !file.Conflicted || file.Path.IsZero() {
+		return nil
+	}
+
+	path := file.Path
+
+	return m.beginWrite(opResolve, func(ctx context.Context, git ports.GitService) error {
+		return git.ResolveConflict(ctx, path, resolution)
+	})
+}
+
+// openAbortMerge asks for confirmation before undoing the merge in progress.
+func (m *Model) openAbortMerge() tea.Cmd {
+	if len(m.status.Conflicts()) == 0 {
+		return nil
+	}
+
+	m.confirm = confirmModal{open: true, kind: confirmAbortMerge}
+
+	return nil
+}
+
+// fetchKey downloads the remote refs.
+func (m *Model) fetchKey() tea.Cmd {
+	return m.beginWriteNotice(opFetch, func(ctx context.Context, git ports.GitService) (string, error) {
+		return noticeFetch, git.Fetch(ctx)
+	})
+}
+
+// pullKey fuses the upstream into the current branch.
+func (m *Model) pullKey() tea.Cmd {
+	return m.beginWriteNotice(opPull, func(ctx context.Context, git ports.GitService) (string, error) {
+		result, err := git.Pull(ctx)
+
+		return mergeNotice(result), err
+	})
+}
+
+// pushKey publishes the current branch to its upstream.
+func (m *Model) pushKey() tea.Cmd {
+	return m.beginWriteNotice(opPush, func(ctx context.Context, git ports.GitService) (string, error) {
+		return noticePush, git.Push(ctx)
 	})
 }
 
@@ -389,9 +655,135 @@ func (m *Model) submitCommit() tea.Cmd {
 
 	m.commit.err = nil
 
-	return m.beginWrite(opCommit, func(ctx context.Context, git ports.GitChanges) error {
+	return m.beginWrite(opCommit, func(ctx context.Context, git ports.GitService) error {
 		return git.Commit(ctx, message)
 	})
+}
+
+// handlePromptKey drives the one-line prompt: enter confirms and esc cancels.
+func (m *Model) handlePromptKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		return m.submitPrompt()
+	case "esc":
+		m.cancelPrompt()
+
+		return nil
+	}
+
+	return m.updatePrompt(msg)
+}
+
+// updatePrompt forwards one message to the text input.
+func (m *Model) updatePrompt(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+
+	m.prompt.input, cmd = m.prompt.input.Update(msg)
+
+	return cmd
+}
+
+// cancelPrompt closes the prompt without an answer.
+func (m *Model) cancelPrompt() {
+	m.prompt.open = false
+	m.prompt.err = nil
+	m.prompt.input.SetValue("")
+}
+
+// submitPrompt sends the value of the prompt; an unusable value never reaches git.
+func (m *Model) submitPrompt() tea.Cmd {
+	if m.writing {
+		return nil
+	}
+
+	value := strings.TrimSpace(m.prompt.input.Value())
+
+	switch m.prompt.kind {
+	case promptNewBranch:
+		return m.submitNewBranch(value)
+	case promptStashMessage:
+		return m.submitStashPush(value)
+	default:
+		return nil
+	}
+}
+
+// submitNewBranch creates the branch of the prompt at its optional start point.
+func (m *Model) submitNewBranch(value string) tea.Cmd {
+	name, startPoint := splitBranch(value)
+	if name == "" {
+		m.prompt.err = fmt.Errorf("%w: el nombre de la rama está vacío", domain.ErrInvalidArgument)
+
+		return nil
+	}
+
+	m.prompt.err = nil
+
+	return m.beginWrite(opCreateBranch, func(ctx context.Context, git ports.GitService) error {
+		return git.CreateBranch(ctx, name, startPoint)
+	})
+}
+
+// splitBranch reads `nombre [punto de partida]` out of one prompt value.
+func splitBranch(value string) (string, string) {
+	fields := strings.Fields(value)
+	switch len(fields) {
+	case 0:
+		return "", ""
+	case 1:
+		return fields[0], ""
+	default:
+		return fields[0], fields[1]
+	}
+}
+
+// submitStashPush saves the tracked changes with the optional message of the prompt.
+func (m *Model) submitStashPush(message string) tea.Cmd {
+	m.prompt.err = nil
+
+	return m.beginWrite(opStashPush, func(ctx context.Context, git ports.GitService) error {
+		return git.StashPush(ctx, message)
+	})
+}
+
+// handleConfirmKey resolves the confirmation: y or enter accepts, n or esc cancels.
+func (m *Model) handleConfirmKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "enter":
+		return m.submitConfirm()
+	case "n", "esc":
+		m.confirm = confirmModal{}
+
+		return nil
+	}
+
+	return nil
+}
+
+// submitConfirm starts the confirmed operation.
+func (m *Model) submitConfirm() tea.Cmd {
+	if m.writing {
+		return nil
+	}
+
+	confirm := m.confirm
+
+	switch confirm.kind {
+	case confirmDeleteBranch:
+		return m.beginWrite(opDeleteBranch, func(ctx context.Context, git ports.GitService) error {
+			return git.DeleteBranch(ctx, confirm.branch, false)
+		})
+	case confirmStashDrop:
+		return m.beginWrite(opStashDrop, func(ctx context.Context, git ports.GitService) error {
+			return git.StashDrop(ctx, confirm.index)
+		})
+	case confirmAbortMerge:
+		return m.beginWrite(opAbortMerge, func(ctx context.Context, git ports.GitService) error {
+			return git.AbortMerge(ctx)
+		})
+	default:
+		return nil
+	}
 }
 
 // reloadHistory asks for the first page of history again.
@@ -401,6 +793,15 @@ func (m *Model) reloadHistory() tea.Cmd {
 	m.errs.history = nil
 
 	return loadHistory(m.git, m.seqs.history, domain.DefaultCommits)
+}
+
+// reloadStashes asks for the stash list again.
+func (m *Model) reloadStashes() tea.Cmd {
+	m.seqs.stashes++
+	m.loading.stashes = true
+	m.errs.stashes = nil
+
+	return loadStashes(m.git, m.seqs.stashes)
 }
 
 // back closes the help or returns to the first section.
@@ -453,6 +854,19 @@ func (m *Model) applyBranches(msg branchesLoadedMsg) {
 	m.clamp(Branches)
 }
 
+func (m *Model) applyStashes(msg stashesLoadedMsg) {
+	if msg.seq != m.seqs.stashes {
+		return
+	}
+
+	m.loading.stashes = false
+	m.errs.stashes = msg.err
+	if msg.err == nil {
+		m.stashes = msg.stashes
+	}
+	m.clamp(Stash)
+}
+
 func (m *Model) applyHistory(msg historyLoadedMsg) {
 	if msg.seq != m.seqs.history {
 		return
@@ -485,21 +899,33 @@ func (m *Model) applyDiff(msg diffLoadedMsg) {
 	m.clamp(Diff)
 }
 
+// writeTimeoutFor bounds one write; the operations that talk to a remote get a longer budget.
+func writeTimeoutFor(op string) time.Duration {
+	switch op {
+	case opFetch, opPull, opPush:
+		return networkTimeout
+	default:
+		return writeTimeout
+	}
+}
+
 // writeCmd runs one write with its own timeout and reports the outcome to the panel.
-func writeCmd(git ports.GitChanges, seq int, op string, run func(context.Context, ports.GitChanges) error) tea.Cmd {
+func writeCmd(git ports.GitService, seq int, op string, run func(context.Context, ports.GitService) (string, error)) tea.Cmd {
 	if git == nil {
 		return func() tea.Msg { return writeDoneMsg{seq: seq, op: op, err: errNoService} }
 	}
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), writeTimeoutFor(op))
 		defer cancel()
 
-		return writeDoneMsg{seq: seq, op: op, err: run(ctx, git)}
+		notice, err := run(ctx, git)
+
+		return writeDoneMsg{seq: seq, op: op, notice: notice, err: err}
 	}
 }
 
-func loadStatus(git ports.GitChanges, seq int) tea.Cmd {
+func loadStatus(git ports.GitService, seq int) tea.Cmd {
 	if git == nil {
 		return func() tea.Msg { return statusLoadedMsg{seq: seq, err: errNoService} }
 	}
@@ -514,7 +940,7 @@ func loadStatus(git ports.GitChanges, seq int) tea.Cmd {
 	}
 }
 
-func loadBranches(git ports.GitChanges, seq int) tea.Cmd {
+func loadBranches(git ports.GitService, seq int) tea.Cmd {
 	if git == nil {
 		return func() tea.Msg { return branchesLoadedMsg{seq: seq, err: errNoService} }
 	}
@@ -529,7 +955,22 @@ func loadBranches(git ports.GitChanges, seq int) tea.Cmd {
 	}
 }
 
-func loadHistory(git ports.GitChanges, seq, limit int) tea.Cmd {
+func loadStashes(git ports.GitService, seq int) tea.Cmd {
+	if git == nil {
+		return func() tea.Msg { return stashesLoadedMsg{seq: seq, err: errNoService} }
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+
+		stashes, err := git.Stashes(ctx)
+
+		return stashesLoadedMsg{seq: seq, stashes: stashes, err: err}
+	}
+}
+
+func loadHistory(git ports.GitService, seq, limit int) tea.Cmd {
 	if git == nil {
 		return func() tea.Msg { return historyLoadedMsg{seq: seq, err: errNoService} }
 	}
@@ -544,7 +985,7 @@ func loadHistory(git ports.GitChanges, seq, limit int) tea.Cmd {
 	}
 }
 
-func loadDiff(git ports.GitChanges, seq int, request domain.DiffRequest) tea.Cmd {
+func loadDiff(git ports.GitService, seq int, request domain.DiffRequest) tea.Cmd {
 	if git == nil {
 		return func() tea.Msg { return diffLoadedMsg{seq: seq, req: request, err: errNoService} }
 	}

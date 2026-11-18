@@ -162,6 +162,41 @@ func TestExecRunnerFiltersTheEnvironment(t *testing.T) {
 	}
 }
 
+func TestExecRunnerDefaultsTheSSHCommandToBatchMode(t *testing.T) {
+	t.Run("sin configurar", func(t *testing.T) {
+		runner := helperRunner(t, "env")
+
+		result, err := runner.Run(context.Background(), "fetch")
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+
+		env := strings.Split(string(result.Stdout), "\n")
+		if got := countEntries(env, "GIT_SSH_COMMAND="+sshNoPrompt); got != 1 {
+			t.Errorf("the environment has %d batch-mode entries, want exactly 1", got)
+		}
+	})
+
+	t.Run("configurado por el usuario", func(t *testing.T) {
+		t.Setenv("GIT_SSH_COMMAND", "ssh -i /tmp/clave")
+
+		runner := helperRunner(t, "env")
+
+		result, err := runner.Run(context.Background(), "fetch")
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+
+		env := strings.Split(string(result.Stdout), "\n")
+		if got := countEntries(env, "GIT_SSH_COMMAND=ssh -i /tmp/clave"); got != 1 {
+			t.Errorf("the environment has %d entries for the user command, want exactly 1", got)
+		}
+		if got := countEntries(env, "GIT_SSH_COMMAND="+sshNoPrompt); got != 0 {
+			t.Errorf("the environment has %d batch-mode entries, want none: the user command wins", got)
+		}
+	})
+}
+
 func TestExecRunnerReportsExitStatusAndStderr(t *testing.T) {
 	runner := helperRunner(t, "fail")
 

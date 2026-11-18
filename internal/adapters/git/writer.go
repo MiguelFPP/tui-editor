@@ -22,7 +22,7 @@ func (s *Service) Stage(ctx context.Context, paths []domain.RelPath) error {
 		return err
 	}
 
-	_, err = s.runWrite(ctx, "Stage", func() (Result, error) {
+	_, err = s.runWrite(ctx, "Stage", true, func() (Result, error) {
 		return s.runner.Run(ctx, append([]string{"add", "--"}, clean...)...)
 	})
 
@@ -36,7 +36,7 @@ func (s *Service) Unstage(ctx context.Context, paths []domain.RelPath) error {
 		return err
 	}
 
-	_, err = s.runWrite(ctx, "Unstage", func() (Result, error) {
+	_, err = s.runWrite(ctx, "Unstage", true, func() (Result, error) {
 		hasHead, err := s.hasHead(ctx)
 		if err != nil {
 			return Result{}, err
@@ -69,7 +69,7 @@ func (s *Service) Commit(ctx context.Context, message string) error {
 		return err
 	}
 
-	_, err = s.runWrite(ctx, "Commit", func() (Result, error) {
+	_, err = s.runWrite(ctx, "Commit", true, func() (Result, error) {
 		staged, err := s.hasStagedChanges(ctx)
 		if err != nil {
 			return Result{}, err
@@ -91,15 +91,15 @@ func (s *Service) applyHunks(ctx context.Context, op string, diff domain.Diff, h
 		return err
 	}
 
-	_, err = s.runWrite(ctx, op, func() (Result, error) {
+	_, err = s.runWrite(ctx, op, true, func() (Result, error) {
 		return s.runner.RunInput(ctx, payload, args...)
 	})
 
 	return err
 }
 
-// runWrite serialises one index write, retrying a locked index once inside the same turn.
-func (s *Service) runWrite(ctx context.Context, op string, run runnerCall) (Result, error) {
+// runWrite serialises one repository write; retry allows a second turn when the index was locked.
+func (s *Service) runWrite(ctx context.Context, op string, retry bool, run runnerCall) (Result, error) {
 	release, err := s.acquireWrite(ctx)
 	if err != nil {
 		return Result{}, err
@@ -112,7 +112,7 @@ func (s *Service) runWrite(ctx context.Context, op string, run runnerCall) (Resu
 	}
 
 	failure := writeError(op, err)
-	if !errors.Is(failure, domain.ErrGitIndexLocked) {
+	if !retry || !errors.Is(failure, domain.ErrGitIndexLocked) {
 		return result, failure
 	}
 	if err := s.retryDelay(ctx); err != nil {

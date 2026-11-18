@@ -297,6 +297,12 @@ var forcedEnv = []string{
 	"LC_MESSAGES=C",
 }
 
+// sshCommandEnv is the variable that decides how git reaches an SSH remote.
+const sshCommandEnv = "GIT_SSH_COMMAND"
+
+// sshNoPrompt makes the SSH transport fail instead of asking for a password.
+const sshNoPrompt = "ssh -o BatchMode=yes"
+
 // forcedNames are replaced, never inherited: the adapter always wins over the parent process.
 var forcedNames = map[string]bool{
 	"GIT_OPTIONAL_LOCKS":  true,
@@ -308,20 +314,31 @@ var forcedNames = map[string]bool{
 	"LC_MESSAGES":         true,
 }
 
-// gitEnv inherits the environment without the variables that would escape the root.
+// gitEnv inherits the environment without the variables that would escape the root; the SSH
+// transport gets a batch-mode command unless the parent process already configured one.
 func gitEnv() []string {
 	env := os.Environ()
-	filtered := make([]string, 0, len(env)+len(forcedEnv))
+	filtered := make([]string, 0, len(env)+len(forcedEnv)+1)
+	configured := false
 
 	for _, entry := range env {
-		if name, _, _ := strings.Cut(entry, "="); blockedEnv[name] || forcedNames[name] {
+		name, _, _ := strings.Cut(entry, "=")
+		if blockedEnv[name] || forcedNames[name] {
 			continue
+		}
+		if name == sshCommandEnv {
+			configured = true
 		}
 
 		filtered = append(filtered, entry)
 	}
 
-	return append(filtered, forcedEnv...)
+	filtered = append(filtered, forcedEnv...)
+	if !configured {
+		filtered = append(filtered, sshCommandEnv+"="+sshNoPrompt)
+	}
+
+	return filtered
 }
 
 // sink keeps at most limit bytes and discards the rest, so git never blocks on a full pipe.

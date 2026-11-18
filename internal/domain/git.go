@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,8 @@ type GitFileStatus struct {
 	Index      GitStatusCode
 	Worktree   GitStatusCode
 	Conflicted bool
+	// Kind is the unmerged state pair, set only when Conflicted is true.
+	Kind ConflictKind
 }
 
 // Staged reports an index change; conflicted entries are neither staged nor unstaged.
@@ -104,6 +107,19 @@ func (s GitStatus) Conflicted() []GitFileStatus {
 	return filterFiles(s.Files, func(f GitFileStatus) bool { return f.Conflicted })
 }
 
+// Conflicts lists the unmerged entries with the kind of the porcelain v2 pair.
+func (s GitStatus) Conflicts() []Conflict {
+	var conflicts []Conflict
+
+	for _, file := range s.Files {
+		if file.Conflicted {
+			conflicts = append(conflicts, Conflict{Path: file.Path, Kind: file.Kind})
+		}
+	}
+
+	return conflicts
+}
+
 func filterFiles(files []GitFileStatus, keep func(GitFileStatus) bool) []GitFileStatus {
 	var kept []GitFileStatus
 
@@ -148,6 +164,29 @@ const (
 	AddedByUs
 	AddedByThem
 )
+
+// ConflictKindFor maps the two status codes of an unmerged record onto its kind; an unknown pair
+// is reported as BothModified.
+func ConflictKindFor(index, worktree GitStatusCode) ConflictKind {
+	switch {
+	case index == GitUnmerged && worktree == GitUnmerged:
+		return BothModified
+	case index == GitAdded && worktree == GitAdded:
+		return BothAdded
+	case index == GitDeleted && worktree == GitDeleted:
+		return BothDeleted
+	case index == GitDeleted && worktree == GitUnmerged:
+		return DeletedByUs
+	case index == GitUnmerged && worktree == GitDeleted:
+		return DeletedByThem
+	case index == GitAdded && worktree == GitUnmerged:
+		return AddedByUs
+	case index == GitUnmerged && worktree == GitAdded:
+		return AddedByThem
+	default:
+		return BothModified
+	}
+}
 
 type Conflict struct {
 	Path RelPath
@@ -257,4 +296,45 @@ type DiffStat struct {
 
 func (s DiffStat) IsEmpty() bool {
 	return len(s.Files) == 0
+}
+
+// refForbidden are the characters git refuses in a reference name.
+const refForbidden = "~^:?*[\\"
+
+// ValidateBranchName rejects anything git would refuse as a local branch name and anything that
+// could be read as an option or as a path instead of a reference.
+func ValidateBranchName(name string) error {
+	switch {
+	case strings.TrimSpace(name) == "":
+		return fmt.Errorf("%w: el nombre de la rama está vacío", ErrInvalidArgument)
+	case len(name) > MaxBranchNameBytes:
+		return fmt.Errorf("%w: el nombre de la rama supera %d bytes", ErrTooLarge, MaxBranchNameBytes)
+	case strings.ContainsRune(name, 0):
+		return fmt.Errorf("%w: el nombre de la rama contiene un byte NUL", ErrInvalidArgument)
+	case strings.HasPrefix(name, "-"):
+		return fmt.Errorf("%w: %q empieza por guion", ErrInvalidArgument, name)
+	case strings.HasPrefix(name, "/"), strings.HasSuffix(name, "/"),
+		strings.HasSuffix(name, "."), strings.Contains(name, "//"),
+		strings.Contains(name, ".."), strings.Contains(name, "@{"):
+		return fmt.Errorf("%w: %q no es un nombre de rama válido", ErrInvalidArgument, name)
+	case name == "@":
+		return fmt.Errorf("%w: %q es el atajo del HEAD y no una rama", ErrInvalidArgument, name)
+	}
+
+	for _, r := range name {
+		if r <= ' ' || r == 0x7f {
+			return fmt.Errorf("%w: %q contiene espacios o caracteres de control", ErrInvalidArgument, name)
+		}
+		if strings.ContainsRune(refForbidden, r) {
+			return fmt.Errorf("%w: %q contiene %q", ErrInvalidArgument, name, r)
+		}
+	}
+
+	for _, segment := range strings.Split(name, "/") {
+		if strings.HasPrefix(segment, ".") || strings.HasSuffix(segment, ".lock") {
+			return fmt.Errorf("%w: %q no es un nombre de rama válido", ErrInvalidArgument, name)
+		}
+	}
+
+	return nil
 }

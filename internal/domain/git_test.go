@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -238,5 +240,123 @@ func TestDiffStatIsEmpty(t *testing.T) {
 	}
 	if !stat.Files[0].Binary || stat.Files[0].OrigPath != "old.png" {
 		t.Errorf("FileStat = %+v, want the binary rename preserved", stat.Files[0])
+	}
+}
+
+func TestConflictKindFor(t *testing.T) {
+	cases := []struct {
+		name     string
+		index    GitStatusCode
+		worktree GitStatusCode
+		want     ConflictKind
+	}{
+		{name: "UU", index: GitUnmerged, worktree: GitUnmerged, want: BothModified},
+		{name: "AA", index: GitAdded, worktree: GitAdded, want: BothAdded},
+		{name: "DD", index: GitDeleted, worktree: GitDeleted, want: BothDeleted},
+		{name: "DU", index: GitDeleted, worktree: GitUnmerged, want: DeletedByUs},
+		{name: "UD", index: GitUnmerged, worktree: GitDeleted, want: DeletedByThem},
+		{name: "AU", index: GitAdded, worktree: GitUnmerged, want: AddedByUs},
+		{name: "UA", index: GitUnmerged, worktree: GitAdded, want: AddedByThem},
+		{name: "desconocido MM", index: GitModified, worktree: GitModified, want: BothModified},
+		{name: "desconocido U.", index: GitUnmerged, worktree: GitUnmodified, want: BothModified},
+		{name: "sin códigos", index: GitUnmodified, worktree: GitUnmodified, want: BothModified},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ConflictKindFor(tc.index, tc.worktree); got != tc.want {
+				t.Errorf("ConflictKindFor(%s, %s) = %d, want %d", tc.index, tc.worktree, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGitStatusConflicts(t *testing.T) {
+	status := GitStatus{Files: []GitFileStatus{
+		{Path: "a.txt", Index: GitUnmerged, Worktree: GitUnmerged, Conflicted: true, Kind: BothModified},
+		{Path: "b.txt", Index: GitAdded, Worktree: GitAdded, Conflicted: true, Kind: BothAdded},
+		{Path: "c.txt", Index: GitModified, Worktree: GitUnmodified},
+		{Path: "d.txt", Index: GitUntracked, Worktree: GitUntracked},
+	}}
+
+	conflicts := status.Conflicts()
+	if len(conflicts) != 2 {
+		t.Fatalf("Conflicts() = %+v, want the two unmerged entries", conflicts)
+	}
+	if conflicts[0].Path != "a.txt" || conflicts[0].Kind != BothModified {
+		t.Errorf("conflict 0 = %+v, want a.txt as BothModified", conflicts[0])
+	}
+	if conflicts[1].Path != "b.txt" || conflicts[1].Kind != BothAdded {
+		t.Errorf("conflict 1 = %+v, want b.txt as BothAdded", conflicts[1])
+	}
+
+	if got := (GitStatus{}).Conflicts(); len(got) != 0 {
+		t.Errorf("empty Conflicts() = %+v, want none", got)
+	}
+	clean := GitStatus{Files: []GitFileStatus{{Path: "a.txt", Index: GitModified, Worktree: GitModified}}}
+	if got := clean.Conflicts(); len(got) != 0 {
+		t.Errorf("clean Conflicts() = %+v, want none", got)
+	}
+}
+
+func TestValidateBranchName(t *testing.T) {
+	valid := []string{"main", "feature/f08-git", "release/v1.2.3", "a.b", "fix_1", "ñandú", "v1.2.3", "a-b_c/d.e"}
+
+	for _, name := range valid {
+		t.Run("valido "+name, func(t *testing.T) {
+			if err := ValidateBranchName(name); err != nil {
+				t.Errorf("ValidateBranchName(%q) error = %v, want nil", name, err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name string
+		want error
+	}{
+		{name: "", want: ErrInvalidArgument},
+		{name: "   ", want: ErrInvalidArgument},
+		{name: "\t", want: ErrInvalidArgument},
+		{name: "con espacio", want: ErrInvalidArgument},
+		{name: "con\nsalto", want: ErrInvalidArgument},
+		{name: "con\x00nul", want: ErrInvalidArgument},
+		{name: "-rama", want: ErrInvalidArgument},
+		{name: "--todo", want: ErrInvalidArgument},
+		{name: "/rama", want: ErrInvalidArgument},
+		{name: "rama/", want: ErrInvalidArgument},
+		{name: "ra//ma", want: ErrInvalidArgument},
+		{name: "rama.", want: ErrInvalidArgument},
+		{name: "rama.lock", want: ErrInvalidArgument},
+		{name: ".rama", want: ErrInvalidArgument},
+		{name: "ra/../ma", want: ErrInvalidArgument},
+		{name: "ra..ma", want: ErrInvalidArgument},
+		{name: "rama@{1}", want: ErrInvalidArgument},
+		{name: "@", want: ErrInvalidArgument},
+		{name: "ra~ma", want: ErrInvalidArgument},
+		{name: "ra^ma", want: ErrInvalidArgument},
+		{name: "ra:ma", want: ErrInvalidArgument},
+		{name: "ra?ma", want: ErrInvalidArgument},
+		{name: "ra*ma", want: ErrInvalidArgument},
+		{name: "ra[ma", want: ErrInvalidArgument},
+		{name: `ra\ma`, want: ErrInvalidArgument},
+		{name: strings.Repeat("a", MaxBranchNameBytes+1), want: ErrTooLarge},
+	}
+
+	for _, tc := range invalid {
+		t.Run("invalido "+tc.name, func(t *testing.T) {
+			err := ValidateBranchName(tc.name)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("ValidateBranchName(%q) error = %v, want %v", tc.name, err, tc.want)
+			}
+			for _, ban := range []string{"--all", "--mirror", "-D"} {
+				if strings.Contains(err.Error(), ban) {
+					t.Errorf("ValidateBranchName(%q) = %q, want it to name the problem, not %q", tc.name, err, ban)
+				}
+			}
+		})
+	}
+
+	if err := ValidateBranchName(strings.Repeat("a", MaxBranchNameBytes)); err != nil {
+		t.Errorf("ValidateBranchName(at the limit) error = %v, want nil", err)
 	}
 }

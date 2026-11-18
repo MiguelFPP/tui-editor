@@ -23,10 +23,7 @@ type Service struct {
 	lockDelay time.Duration
 }
 
-var (
-	_ ports.GitReader  = (*Service)(nil)
-	_ ports.GitChanges = (*Service)(nil)
-)
+var _ ports.GitService = (*Service)(nil)
 
 // New validates the root and the runner without executing git.
 func New(root domain.RepoPath, runner Runner) (*Service, error) {
@@ -213,13 +210,67 @@ func translateError(op string, err error) error {
 		return fmt.Errorf("%w: %s", domain.ErrGitIndexLocked, op)
 	case strings.Contains(stderr, "not a git repository"):
 		return fmt.Errorf("%w: %s", domain.ErrNotRepository, op)
+	case strings.Contains(stderr, "merge_head exists"), strings.Contains(stderr, "concluded your merge"):
+		return fmt.Errorf("%w: %s", domain.ErrMergeInProgress, op)
+	case strings.Contains(stderr, "non-fast-forward"), strings.Contains(stderr, "fetch first"):
+		return fmt.Errorf("%w: %s", domain.ErrNonFastForward, op)
+	case strings.Contains(stderr, "could not resolve host"), strings.Contains(stderr, "connection timed out"),
+		strings.Contains(stderr, "connection refused"), strings.Contains(stderr, "network is unreachable"),
+		strings.Contains(stderr, "no route to host"), strings.Contains(stderr, "operation timed out"),
+		strings.Contains(stderr, "failed to connect"), strings.Contains(stderr, "name resolution"):
+		return fmt.Errorf("%w: %s", domain.ErrRemoteUnreachable, op)
+	case strings.Contains(stderr, "authentication failed"), strings.Contains(stderr, "authentication required"),
+		strings.Contains(stderr, "permission denied (publickey"), strings.Contains(stderr, "invalid username or password"),
+		strings.Contains(stderr, "terminal prompts disabled"), strings.Contains(stderr, "could not read from remote repository"),
+		strings.Contains(stderr, "no anonymous write access"):
+		return fmt.Errorf("%w: %s", domain.ErrAuthRequired, op)
+	case strings.Contains(stderr, "has no upstream branch"), strings.Contains(stderr, "no tracking information"),
+		strings.Contains(stderr, "no upstream"):
+		return fmt.Errorf("%w: %s", domain.ErrNoUpstream, op)
+	case strings.Contains(stderr, "your local changes"), strings.Contains(stderr, "would be overwritten"):
+		return fmt.Errorf("%w: %s", domain.ErrDirtyWorktree, op)
 	case strings.Contains(stderr, "permission denied"), strings.Contains(stderr, "operation not permitted"):
 		return fmt.Errorf("%w: %s", domain.ErrPermissionDenied, op)
-	case strings.Contains(stderr, "no such remote"):
+	case strings.Contains(stderr, "no such remote"), strings.Contains(stderr, "no configured push destination"):
 		return fmt.Errorf("%w: %s", domain.ErrNoRemote, op)
 	}
 
 	return fmt.Errorf("git: %s: %w", op, runErr)
+}
+
+// worktreeStatus reads the tracked status of the repository through the porcelain v2 parser.
+func (s *Service) worktreeStatus(ctx context.Context, op string) (domain.GitStatus, error) {
+	result, err := s.runner.Run(ctx, "status", "--porcelain=v2", "-z", "--untracked-files=no")
+	if err != nil {
+		return domain.GitStatus{}, translateError(op, err)
+	}
+
+	status, err := parseStatus(ctx, result.Stdout)
+	if err != nil {
+		return domain.GitStatus{}, err
+	}
+	status.Truncated = status.Truncated || result.Truncated
+
+	return status, nil
+}
+
+// revParse resolves one revision to its object name; an unknown revision is a not-found error.
+func (s *Service) revParse(ctx context.Context, op, ref string) (string, error) {
+	result, err := s.runner.Run(ctx, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		if isExitCode(err, 1) {
+			return "", fmt.Errorf("%w: %s no resuelve a un objeto de git", domain.ErrNotFound, op)
+		}
+
+		return "", translateError(op, err)
+	}
+
+	name := strings.TrimSpace(string(result.Stdout))
+	if name == "" {
+		return "", fmt.Errorf("%w: %s no resuelve a un objeto de git", domain.ErrNotFound, op)
+	}
+
+	return name, nil
 }
 
 // isNoCommits detects the markers git uses for a branch without commits.

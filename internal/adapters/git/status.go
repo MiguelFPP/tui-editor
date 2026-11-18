@@ -165,7 +165,13 @@ func parseUnmerged(record string) (domain.GitFileStatus, int, bool) {
 
 	index, worktree := statusCodes(fields[1])
 
-	return domain.GitFileStatus{Path: path, Index: index, Worktree: worktree, Conflicted: true}, 0, true
+	return domain.GitFileStatus{
+		Path:       path,
+		Index:      index,
+		Worktree:   worktree,
+		Conflicted: true,
+		Kind:       domain.ConflictKindFor(index, worktree),
+	}, 0, true
 }
 
 // ? <path>

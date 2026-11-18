@@ -1,4 +1,5 @@
-// Package gitpanel renders the Git sections of one repository and stages and commits them.
+// Package gitpanel renders the Git sections of one repository, stages and commits them, and drives
+// the branch, stash, merge and sync operations.
 package gitpanel
 
 import (
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -30,10 +32,14 @@ const (
 	loadTimeout = 5 * time.Second
 	// writeTimeout bounds a stage or commit, including the repository hooks.
 	writeTimeout = 60 * time.Second
-	wheelStep    = 3
+	// networkTimeout bounds a fetch, a pull or a push, which talk to a remote.
+	networkTimeout = 2 * time.Minute
+	wheelStep      = 3
 
 	// commitRows is the height of the commit message editor.
 	commitRows = 6
+	// promptCells leaves room for the "> " prompt of the text input inside the panel.
+	promptCells = 3
 
 	// The write operations, used to label their result.
 	opStage        = "preparar"
@@ -41,6 +47,23 @@ const (
 	opStageHunks   = "preparar hunks"
 	opUnstageHunks = "quitar hunks"
 	opCommit       = "commit"
+	opCheckout     = "checkout"
+	opCreateBranch = "crear rama"
+	opDeleteBranch = "borrar rama"
+	opStashPush    = "stash"
+	opStashApply   = "aplicar stash"
+	opStashPop     = "pop stash"
+	opStashDrop    = "descartar stash"
+	opMerge        = "merge"
+	opAbortMerge   = "abortar merge"
+	opResolve      = "resolver conflicto"
+	opFetch        = "fetch"
+	opPull         = "pull"
+	opPush         = "push"
+
+	// The notices shown when a network write succeeds.
+	noticeFetch = "fetch completado"
+	noticePush  = "push completado"
 )
 
 // Section is one navigable block of the panel.
@@ -50,12 +73,13 @@ const (
 	Changes Section = iota
 	Diff
 	Branches
+	Stash
 	History
 
-	sectionCount = 4
+	sectionCount = 5
 )
 
-var sectionLabels = [sectionCount]string{"Cambios", "Diff", "Ramas", "Historial"}
+var sectionLabels = [sectionCount]string{"Cambios", "Diff", "Ramas", "Stash", "Historial"}
 
 func (s Section) String() string {
 	if s >= sectionCount {
@@ -79,6 +103,13 @@ type branchesLoadedMsg struct {
 	err      error
 }
 
+// stashesLoadedMsg carries the stash list.
+type stashesLoadedMsg struct {
+	seq     int
+	stashes []domain.StashEntry
+	err     error
+}
+
 // historyLoadedMsg carries one page of history.
 type historyLoadedMsg struct {
 	seq  int
@@ -94,11 +125,12 @@ type diffLoadedMsg struct {
 	err  error
 }
 
-// writeDoneMsg carries the outcome of one stage, unstage or commit.
+// writeDoneMsg carries the outcome of one write, plus the notice a network write leaves behind.
 type writeDoneMsg struct {
-	seq int
-	op  string
-	err error
+	seq    int
+	op     string
+	notice string
+	err    error
 }
 
 var errNoService = errors.New("gitpanel: servicio de git no configurado")
@@ -126,7 +158,7 @@ func plainCells(style lipgloss.Style) lipgloss.Style {
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {
-	git ports.GitChanges
+	git ports.GitService
 
 	section Section
 	cursors [sectionCount]int
@@ -134,6 +166,8 @@ type Model struct {
 
 	status        domain.GitStatus
 	branches      []domain.Branch
+	stashes       []domain.StashEntry
+	stashesLoaded bool
 	history       domain.CommitPage
 	historyLoaded bool
 
@@ -148,8 +182,11 @@ type Model struct {
 
 	writing  bool
 	writeErr error
+	notice   string
 
-	commit commitModal
+	commit  commitModal
+	prompt  promptModal
+	confirm confirmModal
 
 	loading loadingState
 	errs    errorState
@@ -167,9 +204,46 @@ type commitModal struct {
 	area textarea.Model
 }
 
+// promptKind selects what the one-line prompt asks for.
+type promptKind uint8
+
+const (
+	promptNone promptKind = iota
+	promptNewBranch
+	promptStashMessage
+)
+
+// promptModal is the one-line input of a branch name or a stash message.
+type promptModal struct {
+	open  bool
+	kind  promptKind
+	err   error
+	input textinput.Model
+}
+
+// confirmKind selects what the confirmation would do.
+type confirmKind uint8
+
+const (
+	confirmNone confirmKind = iota
+	confirmDeleteBranch
+	confirmStashDrop
+	confirmAbortMerge
+)
+
+// confirmModal asks for a yes or a no before a destructive operation.
+type confirmModal struct {
+	open   bool
+	kind   confirmKind
+	branch string
+	index  int
+	err    error
+}
+
 type loadingState struct {
 	status   bool
 	branches bool
+	stashes  bool
 	history  bool
 	diff     bool
 }
@@ -177,6 +251,7 @@ type loadingState struct {
 type errorState struct {
 	status   error
 	branches error
+	stashes  error
 	history  error
 	diff     error
 }
@@ -184,19 +259,21 @@ type errorState struct {
 type seqState struct {
 	status   int
 	branches int
+	stashes  int
 	history  int
 	diff     int
 	write    int
 }
 
 // New builds the panel; Init asks for the status and the branches, nothing else.
-func New(git ports.GitChanges) Model {
+func New(git ports.GitService) Model {
 	m := Model{
 		git:     git,
 		loading: loadingState{status: true, branches: true},
 		seqs:    seqState{status: 1, branches: 1},
 		marked:  make(map[int]bool),
 		commit:  newCommitModal(defaultWidth, defaultHeight),
+		prompt:  newPromptModal(promptNone, defaultWidth),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
@@ -216,9 +293,40 @@ func newCommitModal(width, height int) commitModal {
 	return commitModal{area: area}
 }
 
-// CapturesInput reports that the modal owns the keyboard of the panel.
+// newPromptModal builds the text input of one prompt kind.
+func newPromptModal(kind promptKind, width int) promptModal {
+	input := textinput.New()
+	input.Prompt = promptMark
+	input.Placeholder = promptPlaceholder(kind)
+	input.CharLimit = promptCharLimit(kind)
+	input.SetWidth(promptWidth(width))
+
+	return promptModal{kind: kind, input: input}
+}
+
+const promptMark = "> "
+
+// promptPlaceholder is the hint shown while the prompt is empty.
+func promptPlaceholder(kind promptKind) string {
+	if kind == promptStashMessage {
+		return "mensaje del stash (opcional)"
+	}
+
+	return "nombre [punto de partida]"
+}
+
+// promptCharLimit bounds what the input accepts, mirroring the domain limits.
+func promptCharLimit(kind promptKind) int {
+	if kind == promptStashMessage {
+		return domain.MaxCommitMessageBytes
+	}
+
+	return domain.MaxBranchNameBytes
+}
+
+// CapturesInput reports that a modal owns the keyboard of the panel.
 func (m Model) CapturesInput() bool {
-	return m.commit.open
+	return m.commit.open || m.prompt.open || m.confirm.open
 }
 
 // modalWidth keeps the editor one cell inside the panel.
@@ -233,6 +341,11 @@ func modalRows(height int) int {
 	return min(max(body-2, 1), commitRows)
 }
 
+// promptWidth keeps the input, plus its two-cell prompt, inside the panel.
+func promptWidth(width int) int {
+	return max(width-promptCells, 1)
+}
+
 // Init requests the status and the branch list of the repository.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(loadStatus(m.git, m.seqs.status), loadBranches(m.git, m.seqs.branches))
@@ -245,7 +358,8 @@ func (m Model) Section() Section {
 
 // Loading reports whether any section is still reading or a write is in flight.
 func (m Model) Loading() bool {
-	return m.writing || m.loading.status || m.loading.branches || m.loading.history || m.loading.diff
+	return m.writing || m.loading.status || m.loading.branches || m.loading.stashes ||
+		m.loading.history || m.loading.diff
 }
 
 // Err returns the first active error, if any.
@@ -257,20 +371,27 @@ func (m Model) Err() error {
 		return m.writeErr
 	case m.commit.err != nil:
 		return m.commit.err
+	case m.prompt.err != nil:
+		return m.prompt.err
+	case m.confirm.err != nil:
+		return m.confirm.err
 	case m.errs.diff != nil:
 		return m.errs.diff
 	case m.errs.branches != nil:
 		return m.errs.branches
+	case m.errs.stashes != nil:
+		return m.errs.stashes
 	default:
 		return m.errs.history
 	}
 }
 
-// SetSize stores the terminal size, resizes the modal and re-renders the cached diff.
+// SetSize stores the terminal size, resizes the modals and re-renders the cached diff.
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = max(width, 0), max(height, 0)
 	m.commit.area.SetWidth(modalWidth(m.width))
 	m.commit.area.SetHeight(modalRows(m.height))
+	m.prompt.input.SetWidth(promptWidth(m.width))
 
 	m.sync()
 }
@@ -297,6 +418,8 @@ func (m Model) rows(section Section) []string {
 		return m.diffRows()
 	case Branches:
 		return m.branchRows()
+	case Stash:
+		return m.stashRows()
 	default:
 		return m.historyRows()
 	}
@@ -320,6 +443,15 @@ func (m Model) branchRows() []string {
 	rows := make([]string, 0, len(m.branches))
 	for _, branch := range m.branches {
 		rows = append(rows, branchRow(branch))
+	}
+
+	return rows
+}
+
+func (m Model) stashRows() []string {
+	rows := make([]string, 0, len(m.stashes))
+	for _, entry := range m.stashes {
+		rows = append(rows, stashRow(entry))
 	}
 
 	return rows
@@ -449,6 +581,24 @@ func (m Model) selectedFile() (domain.GitFileStatus, bool) {
 	return m.status.Files[m.cursors[Changes]], true
 }
 
+// selectedBranch returns the branch under the cursor of the Branches section.
+func (m Model) selectedBranch() (domain.Branch, bool) {
+	if m.cursors[Branches] < 0 || m.cursors[Branches] >= len(m.branches) {
+		return domain.Branch{}, false
+	}
+
+	return m.branches[m.cursors[Branches]], true
+}
+
+// selectedStashIndex returns the position of the stash under the cursor of its section.
+func (m Model) selectedStashIndex() (int, bool) {
+	if m.cursors[Stash] < 0 || m.cursors[Stash] >= len(m.stashes) {
+		return 0, false
+	}
+
+	return m.stashes[m.cursors[Stash]].Index, true
+}
+
 // sectionError returns the failure of one section, if any.
 func (m Model) sectionError(section Section) error {
 	switch section {
@@ -458,6 +608,8 @@ func (m Model) sectionError(section Section) error {
 		return m.errs.diff
 	case Branches:
 		return m.errs.branches
+	case Stash:
+		return m.errs.stashes
 	default:
 		return m.errs.history
 	}
@@ -471,6 +623,8 @@ func (m Model) sectionLoading(section Section) bool {
 		return m.loading.diff
 	case Branches:
 		return m.loading.branches
+	case Stash:
+		return m.loading.stashes
 	default:
 		return m.loading.history
 	}
@@ -489,6 +643,24 @@ func describeError(err error) string {
 		return "el índice de git está bloqueado"
 	case errors.Is(err, domain.ErrNoChanges):
 		return "no hay cambios preparados"
+	case errors.Is(err, domain.ErrConflict):
+		return "quedan conflictos sin resolver"
+	case errors.Is(err, domain.ErrMergeInProgress):
+		return "hay un merge en curso"
+	case errors.Is(err, domain.ErrNoMergeInProgress):
+		return "no hay ningún merge en curso"
+	case errors.Is(err, domain.ErrDirtyWorktree):
+		return "hay cambios sin guardar en el árbol de trabajo"
+	case errors.Is(err, domain.ErrNoUpstream):
+		return "la rama no tiene upstream"
+	case errors.Is(err, domain.ErrNonFastForward):
+		return "el remoto tiene commits nuevos: haz pull antes de push"
+	case errors.Is(err, domain.ErrAuthRequired):
+		return "el remoto pide autenticación"
+	case errors.Is(err, domain.ErrRemoteUnreachable):
+		return "no se pudo alcanzar el remoto"
+	case errors.Is(err, domain.ErrNoRemote):
+		return "no hay remoto configurado"
 	case errors.Is(err, domain.ErrTooLarge):
 		return "contenido demasiado grande"
 	case errors.Is(err, domain.ErrPermissionDenied):
@@ -497,6 +669,8 @@ func describeError(err error) string {
 		return "ruta inválida"
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return "argumento inválido"
+	case errors.Is(err, domain.ErrNotFound):
+		return "no encontrado"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "tiempo agotado"
 	case errors.Is(err, context.Canceled):
@@ -539,6 +713,18 @@ func branchRow(branch domain.Branch) string {
 	}
 	if branch.Behind > 0 {
 		label += " ↓" + strconv.Itoa(branch.Behind)
+	}
+
+	return label
+}
+
+func stashRow(entry domain.StashEntry) string {
+	label := entry.Ref()
+	if entry.Branch != "" {
+		label += " · " + entry.Branch
+	}
+	if entry.Message != "" {
+		label += " · " + entry.Message
 	}
 
 	return label
@@ -591,4 +777,28 @@ func truncate(text string, width int) string {
 	}
 
 	return string(runes[:width-1]) + "…"
+}
+
+// mergeNotice summarizes the outcome of a merge or a pull.
+func mergeNotice(result domain.MergeResult) string {
+	switch result.Status {
+	case domain.UpToDate:
+		return "merge: ya al día"
+	case domain.FastForward:
+		return "merge: avance rápido"
+	case domain.Conflicted:
+		return "merge: " + conflictCount(len(result.Conflicts))
+	default:
+		return "merge: commit de fusión"
+	}
+}
+
+// forcesHistory reports which writes reload the history even if it was never shown.
+func forcesHistory(op string) bool {
+	switch op {
+	case opCommit, opCheckout, opCreateBranch, opDeleteBranch, opMerge, opPull:
+		return true
+	default:
+		return false
+	}
 }

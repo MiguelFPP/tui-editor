@@ -16,6 +16,9 @@ const (
 	MaxStashes       = 100
 	MaxDiffFiles     = 500
 
+	// MaxBranchNameBytes bounds the branch names the adapter accepts.
+	MaxBranchNameBytes = 255
+
 	// MaxCommitMessageBytes bounds the message sent to `git commit -F -`.
 	MaxCommitMessageBytes = 64 << 10
 
