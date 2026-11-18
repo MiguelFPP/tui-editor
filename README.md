@@ -49,9 +49,6 @@ tui-editor/
 │       │   └── model_test.go
 │       └── components/
 │           └── doc.go
-├── docs/
-│   └── adr/
-│       └── 0001-arquitectura-hexagonal-mvu.md
 ├── .air.toml
 ├── .dockerignore
 ├── .gitignore
@@ -64,7 +61,7 @@ tui-editor/
 └── go.sum
 ```
 
-Los paquetes `domain`, `ports`, `adapters/*`, `tui/components` y `testutil/fakes` son esqueletos vacíos: solo fijan el boundary de cada capa (ver `docs/adr/0001-arquitectura-hexagonal-mvu.md`).
+Los paquetes `domain`, `ports`, `adapters/*`, `tui/components` y `testutil/fakes` son esqueletos vacíos: solo fijan el boundary de cada capa.
 
 ## Requisitos
 
