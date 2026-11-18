@@ -2,7 +2,7 @@
 
 TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploración y edición rápida de archivos, control completo de Git y monitorización de contenedores Docker.
 
-Estado actual: **v0.1.0 (MVP de lectura)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview y añade un panel de Git de solo lectura, todo en pestañas. La edición y el panel Docker llegan en fases posteriores.
+Estado actual: **v0.2.0 (Git interactivo)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview y añade un panel Git completo: staging por archivo/hunk, commit, ramas, stash, merge y sincronización. La edición y el panel Docker llegan en fases posteriores.
 
 ## Stack
 
@@ -87,18 +87,25 @@ El TUI necesita un TTY real: usa `docker compose run` (o los targets de arriba) 
 
 El clic izquierdo selecciona y el doble clic expande o abre. La rueda desplaza el panel bajo el cursor. El preview usa resaltado de sintaxis con Chroma, números de línea, scroll y detección de binarios y de tamaño.
 
-### Git (solo lectura)
+### Git
 
 | Atajo | Acción |
 | --- | --- |
-| `tab` / `shift+tab` | Cambiar de sección (`Cambios`, `Diff`, `Ramas`, `Historial`) |
+| `tab` / `shift+tab` | Cambiar de sección (`Cambios`, `Diff`, `Ramas`, `Stash`, `Historial`) |
 | `↑`/`↓`, `j`/`k` | Mover el cursor |
-| `enter` | Cargar el diff del archivo seleccionado |
+| `enter` | Cargar el diff del archivo, hacer checkout de la rama, aplicar stash o abrir el commit |
 | `d` | Alternar entre `worktree` y `staged` |
-| `r` | Refrescar estado, ramas, historial y diff |
-| `esc` | Cerrar la ayuda o volver a `Cambios` |
+| `s` / `u` | Preparar o quitar el archivo seleccionado; en `Diff`, el hunk marcado |
+| `[` / `]` / `espacio` | Mover el cursor de hunk y marcarlo |
+| `c` | Abrir el modal de commit (`ctrl+s` confirma, `esc` cancela) |
+| `n` / `x` / `m` | Nueva rama, borrar rama (con confirmación), merge de la rama seleccionada |
+| `z` | Stash push (en Cambios) o stash pop (en Stash) |
+| `o` / `t` / `A` | Resolver conflicto ours/theirs o abortar el merge (con confirmación) |
+| `f` / `p` / `P` | `fetch`, `pull`, `push` |
+| `r` | Refrescar estado, ramas, historial y stash |
+| `esc` | Cerrar el modal/ayuda o volver a `Cambios` |
 
-Todo el panel Git es de solo lectura: no prepara, no confirma y no toca el índice.
+El panel Git es interactivo: prepara archivos y hunks, crea commits con mensaje multilínea, gestiona ramas y stash, detecta conflictos y sincroniza con el upstream. Las operaciones de escritura se serializan y nunca fuerzan push ni borran ramas sin confirmación.
 
 ## Comandos
 
@@ -133,7 +140,7 @@ Cada fase ejecuta solo los paquetes que toca. La suite completa está reservada 
 
 | Flag | Default | Descripción |
 | --- | --- | --- |
-| `--version` | — | Imprime `tui-editor 0.1.0` y sale con código 0 |
+| `--version` | — | Imprime `tui-editor 0.2.0` y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |
@@ -147,10 +154,11 @@ docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version
 
 ## Alcance y limitaciones
 
-- Solo lectura: no se edita ni se guardan archivos; el preview es de consulta.
-- Git de solo lectura: `status`, `diff`, ramas e historial; sin staging, commit ni merge.
+- Sin edición todavía: no se edita ni se guardan archivos; el preview es de consulta. La edición rápida y el editor externo llegan en F11.
+- Git interactivo: staging por archivo/hunk, commit, ramas, stash, merge, conflictos y sync.
 - Sin panel Docker: llega en una fase posterior y no se monta el socket por defecto.
 - Previews y listados acotados por tamaño y número de líneas; los binarios se detectan y no se renderizan.
+- El staging por hunk cubre archivos modificados; los binarios, untracked y renames se preparan por archivo.
 
 ## Cómo añadir dependencias
 
