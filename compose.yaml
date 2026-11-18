@@ -1,11 +1,11 @@
-name: tui-fer-editor
+name: tui-editor
 
 services:
   dev:
     build:
       context: .
       target: dev
-    image: tui-fer-editor:dev
+    image: tui-editor:dev
     init: true
     stdin_open: true
     tty: true
@@ -23,7 +23,7 @@ services:
     build:
       context: .
       target: runtime
-    image: tui-fer-editor:latest
+    image: tui-editor:latest
     init: true
     stdin_open: true
     tty: true

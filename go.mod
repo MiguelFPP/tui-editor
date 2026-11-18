@@ -1,4 +1,4 @@
-module tui-fer-editor
+module github.com/MiguelFPP/tui-editor
 
 go 1.27.4
 
