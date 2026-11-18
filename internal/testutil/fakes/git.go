@@ -20,8 +20,8 @@ type GitService struct {
 	OnShow            func(ctx context.Context, hash string) (domain.CommitDetail, error)
 	OnStage           func(ctx context.Context, paths []domain.RelPath) error
 	OnUnstage         func(ctx context.Context, paths []domain.RelPath) error
-	OnStageHunks      func(ctx context.Context, path domain.RelPath, hunks []domain.DiffHunk) error
-	OnUnstageHunks    func(ctx context.Context, path domain.RelPath, hunks []domain.DiffHunk) error
+	OnStageHunks      func(ctx context.Context, diff domain.Diff, hunks []int) error
+	OnUnstageHunks    func(ctx context.Context, diff domain.Diff, hunks []int) error
 	OnCommit          func(ctx context.Context, message string) error
 	OnCheckout        func(ctx context.Context, branch string) error
 	OnCreateBranch    func(ctx context.Context, name, startPoint string) error
@@ -150,25 +150,25 @@ func (g *GitService) Unstage(ctx context.Context, paths []domain.RelPath) error 
 	return nil
 }
 
-func (g *GitService) StageHunks(ctx context.Context, path domain.RelPath, hunks []domain.DiffHunk) error {
-	g.record("StageHunks", path, hunks)
+func (g *GitService) StageHunks(ctx context.Context, diff domain.Diff, hunks []int) error {
+	g.record("StageHunks", diff, hunks)
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("StageHunks: %w", err)
 	}
 	if fn := hook(&g.recorder, &g.OnStageHunks); fn != nil {
-		return fn(ctx, path, hunks)
+		return fn(ctx, diff, hunks)
 	}
 
 	return nil
 }
 
-func (g *GitService) UnstageHunks(ctx context.Context, path domain.RelPath, hunks []domain.DiffHunk) error {
-	g.record("UnstageHunks", path, hunks)
+func (g *GitService) UnstageHunks(ctx context.Context, diff domain.Diff, hunks []int) error {
+	g.record("UnstageHunks", diff, hunks)
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("UnstageHunks: %w", err)
 	}
 	if fn := hook(&g.recorder, &g.OnUnstageHunks); fn != nil {
-		return fn(ctx, path, hunks)
+		return fn(ctx, diff, hunks)
 	}
 
 	return nil

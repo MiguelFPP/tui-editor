@@ -26,6 +26,9 @@ type patchFile struct {
 	renOld string
 	renNew string
 	hasRen bool
+
+	isNew     bool
+	isDeleted bool
 }
 
 // hunkCursor tracks the line numbers of the hunk being read.
@@ -59,6 +62,8 @@ func parsePatch(raw string) []domain.Diff {
 		}
 
 		file.diff.Path, file.diff.OrigPath = file.names()
+		file.diff.New = file.isNew
+		file.diff.Deleted = file.isDeleted
 		files = append(files, file.diff)
 		open = false
 	}
@@ -92,6 +97,10 @@ func parsePatch(raw string) []domain.Diff {
 			file.renOld, file.hasRen = patchPath(afterKeyword(line)), true
 		case strings.HasPrefix(line, "rename to "), strings.HasPrefix(line, "copy to "):
 			file.renNew, file.hasRen = patchPath(afterKeyword(line)), true
+		case strings.HasPrefix(line, "new file mode "):
+			file.isNew = true
+		case strings.HasPrefix(line, "deleted file mode "):
+			file.isDeleted = true
 		case strings.HasPrefix(line, "Binary files "), line == "GIT binary patch":
 			file.diff.Binary = true
 		default:

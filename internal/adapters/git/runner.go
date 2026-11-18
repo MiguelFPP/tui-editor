@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
@@ -18,6 +20,9 @@ const (
 	RunTimeout     = 10 * time.Second
 	MaxOutputBytes = 8 << 20
 	MaxErrorBytes  = 64 << 10
+
+	// MaxInputBytes bounds the stdin one invocation may receive.
+	MaxInputBytes = 1 << 20
 
 	waitDelay    = 2 * time.Second
 	errorSnippet = 300
@@ -73,6 +78,8 @@ func snippet(text string) string {
 // Runner runs one git subcommand without a shell.
 type Runner interface {
 	Run(ctx context.Context, args ...string) (Result, error)
+	// RunInput feeds stdin to the subcommand; stdin may be nil.
+	RunInput(ctx context.Context, stdin []byte, args ...string) (Result, error)
 }
 
 // ExecRunner runs the native git binary; NewExecRunner fills the bounded defaults.
@@ -99,10 +106,22 @@ func NewExecRunner(root domain.RepoPath) *ExecRunner {
 
 // Run executes args as one git subcommand, with separated streams and bounded output.
 func (r *ExecRunner) Run(ctx context.Context, args ...string) (Result, error) {
+	return r.run(ctx, nil, args)
+}
+
+// RunInput executes args as one git subcommand and writes stdin to it, without a shell.
+func (r *ExecRunner) RunInput(ctx context.Context, stdin []byte, args ...string) (Result, error) {
+	return r.run(ctx, stdin, args)
+}
+
+func (r *ExecRunner) run(ctx context.Context, stdin []byte, args []string) (Result, error) {
 	if r.Root.IsZero() {
 		return Result{}, fmt.Errorf("%w: falta la raíz del repositorio", domain.ErrInvalidPath)
 	}
 	if err := validateArgs(args); err != nil {
+		return Result{}, err
+	}
+	if err := validateInput(stdin); err != nil {
 		return Result{}, err
 	}
 
@@ -111,7 +130,8 @@ func (r *ExecRunner) Run(ctx context.Context, args ...string) (Result, error) {
 		return Result{}, &RunError{Args: args, Err: err}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, r.timeout())
+	// A deadline set by the caller wins: the runner never shortens its budget.
+	ctx, cancel := r.deadline(ctx)
 	defer cancel()
 
 	stdout := newSink(r.limit(r.MaxOut, MaxOutputBytes))
@@ -121,6 +141,9 @@ func (r *ExecRunner) Run(ctx context.Context, args ...string) (Result, error) {
 	cmd.Env = gitEnv()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if len(stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.WaitDelay = waitDelay
 
 	runErr := cmd.Run()
@@ -134,6 +157,9 @@ func (r *ExecRunner) Run(ctx context.Context, args ...string) (Result, error) {
 	if runErr == nil {
 		return result, nil
 	}
+	if abandonedStdin(cmd, runErr) {
+		return result, nil // git closed stdin early and still exited cleanly
+	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return result, &RunError{Args: args, Code: result.Code, Stderr: result.Stderr, Err: ctxErr}
 	}
@@ -144,6 +170,16 @@ func (r *ExecRunner) Run(ctx context.Context, args ...string) (Result, error) {
 	}
 
 	return result, &RunError{Args: args, Stderr: result.Stderr, Err: runErr}
+}
+
+// abandonedStdin reports a failed stdin copy of a process that exited successfully: git stopped
+// reading what it no longer needed, which is not a failure of the invocation.
+func abandonedStdin(cmd *exec.Cmd, err error) bool {
+	if cmd.ProcessState == nil || !cmd.ProcessState.Success() {
+		return false
+	}
+
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe)
 }
 
 // command builds the global prefix; only the subcommand arguments are appended to it.
@@ -192,12 +228,33 @@ func (r *ExecRunner) timeout() time.Duration {
 	return RunTimeout
 }
 
+// deadline applies the runner timeout only when the caller did not set one of its own.
+func (r *ExecRunner) deadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, r.timeout())
+}
+
 func (r *ExecRunner) limit(configured, fallback int) int {
 	if configured > 0 {
 		return configured
 	}
 
 	return fallback
+}
+
+// validateInput rejects the stdin the adapter refuses to pipe into git.
+func validateInput(stdin []byte) error {
+	if len(stdin) > MaxInputBytes {
+		return fmt.Errorf("%w: la entrada de git supera %d bytes", domain.ErrTooLarge, MaxInputBytes)
+	}
+	if bytes.IndexByte(stdin, 0) >= 0 {
+		return fmt.Errorf("%w: la entrada de git contiene un byte NUL", domain.ErrInvalidArgument)
+	}
+
+	return nil
 }
 
 // validateArgs rejects anything that would need a shell or change the global prefix.

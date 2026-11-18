@@ -172,6 +172,65 @@ func TestParsePatchDeletedFileKeepsTheOldPath(t *testing.T) {
 	if files[0].Additions != 0 || files[0].Deletions != 2 {
 		t.Errorf("counts = %d/%d, want 0/2", files[0].Additions, files[0].Deletions)
 	}
+	if !files[0].Deleted || files[0].New {
+		t.Errorf("flags = new:%v deleted:%v, want a deleted file", files[0].New, files[0].Deleted)
+	}
+}
+
+func TestParsePatchNewFileUsesThePostImagePath(t *testing.T) {
+	raw := "diff --git nuevo.txt nuevo.txt\n" +
+		"new file mode 100644\n" +
+		"index 0000000..15bf608\n" +
+		"--- /dev/null\n" +
+		"+++ nuevo.txt\n" +
+		"@@ -0,0 +1,2 @@\n" +
+		"+uno\n" +
+		"+dos\n"
+
+	files := parsePatch(raw)
+	if len(files) != 1 {
+		t.Fatalf("len(files) = %d, want 1", len(files))
+	}
+
+	file := files[0]
+	if file.Path != "nuevo.txt" || file.OrigPath != "" {
+		t.Errorf("paths = %q/%q, want the post-image as the only path", file.Path, file.OrigPath)
+	}
+	if !file.New || file.Deleted || file.Binary {
+		t.Errorf("flags = %+v, want a new text file", file)
+	}
+	if file.Additions != 2 || file.Deletions != 0 {
+		t.Errorf("counts = %d/%d, want 2/0", file.Additions, file.Deletions)
+	}
+	if hunk := file.Hunks[0]; hunk.OldStart != 0 || hunk.OldLines != 0 || hunk.NewLines != 2 {
+		t.Errorf("hunk range = %d,%d/%d,%d, want 0,0/1,2", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
+	}
+}
+
+func TestParsePatchKeepsTheNewAndDeletedFlagsApart(t *testing.T) {
+	raw := "diff --git a.txt a.txt\n" +
+		"--- a.txt\n" +
+		"+++ a.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"-uno\n" +
+		"+dos\n" +
+		"diff --git b.txt b.txt\n" +
+		"new file mode 100644\n" +
+		"--- /dev/null\n" +
+		"+++ b.txt\n" +
+		"@@ -0,0 +1 @@\n" +
+		"+tres\n"
+
+	files := parsePatch(raw)
+	if len(files) != 2 {
+		t.Fatalf("len(files) = %d, want 2", len(files))
+	}
+	if files[0].New || files[0].Deleted {
+		t.Errorf("a.txt = %+v, want a plain modification", files[0])
+	}
+	if !files[1].New || files[1].Deleted {
+		t.Errorf("b.txt = %+v, want only the new flag", files[1])
+	}
 }
 
 func TestParsePatchTruncatesAtMaxDiffLines(t *testing.T) {

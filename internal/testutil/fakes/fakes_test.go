@@ -365,8 +365,12 @@ func TestGitServiceRecordsEveryWriterCall(t *testing.T) {
 	}{
 		{method: "Stage", call: func() error { return svc.Stage(context.Background(), nil) }},
 		{method: "Unstage", call: func() error { return svc.Unstage(context.Background(), nil) }},
-		{method: "StageHunks", call: func() error { return svc.StageHunks(context.Background(), "a.go", nil) }},
-		{method: "UnstageHunks", call: func() error { return svc.UnstageHunks(context.Background(), "a.go", nil) }},
+		{method: "StageHunks", call: func() error {
+			return svc.StageHunks(context.Background(), domain.Diff{Path: "a.go"}, []int{0})
+		}},
+		{method: "UnstageHunks", call: func() error {
+			return svc.UnstageHunks(context.Background(), domain.Diff{Path: "a.go"}, []int{0})
+		}},
 		{method: "Commit", call: func() error { return svc.Commit(context.Background(), "m") }},
 		{method: "Checkout", call: func() error { return svc.Checkout(context.Background(), "main") }},
 		{method: "CreateBranch", call: func() error { return svc.CreateBranch(context.Background(), "feat", "main") }},

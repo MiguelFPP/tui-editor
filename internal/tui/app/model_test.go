@@ -146,6 +146,33 @@ func wheel(button tea.MouseButton, x, y int) tea.MouseWheelMsg {
 	return tea.MouseWheelMsg{X: x, Y: y, Button: button}
 }
 
+// press applies one key and returns the model with its command still to run.
+func press(t *testing.T, m Model, msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	t.Helper()
+
+	next, cmd := m.Update(msg)
+	model, ok := next.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want app.Model", next)
+	}
+
+	return model, cmd
+}
+
+// stagedGit turns the Git fake into a repository with one modified file.
+func stagedGit(t *testing.T, deps Deps) *fakes.GitService {
+	t.Helper()
+
+	git := deps.Git.(*fakes.GitService)
+	git.OnStatus = func(context.Context) (domain.GitStatus, error) {
+		return domain.GitStatus{Branch: "main", Files: []domain.GitFileStatus{
+			{Path: "main.go", Index: domain.GitModified, Worktree: domain.GitUnmodified},
+		}}, nil
+	}
+
+	return git
+}
+
 func TestNewKeepsConfigAndDefaults(t *testing.T) {
 	deps := testDeps(t)
 	m := New(deps)
@@ -507,5 +534,88 @@ func TestLayoutFitsTheCanvas(t *testing.T) {
 	content := m.View().Content
 	if got, want := strings.Count(content, "\n")+1, 40; got != want {
 		t.Errorf("rendered %d rows, want %d", got, want)
+	}
+}
+
+func TestGitCommitModalOwnsTheKeyboard(t *testing.T) {
+	deps := testDeps(t)
+	m := newSized(t, deps, 120, 40)
+	m = drain(t, m, m.Init())
+	m = update(t, m, typed('2'))
+
+	m, cmd := press(t, m, typed('c'))
+	if cmd == nil {
+		t.Fatal("no command, want the editor focus")
+	}
+	if !m.git.CapturesInput() {
+		t.Fatal("CapturesInput() = false after c, want the modal open")
+	}
+
+	// q, 1 and ? must reach the editor instead of the root keymap.
+	for _, msg := range []tea.KeyPressMsg{typed('q'), typed('1'), typed('?'), typed('2')} {
+		m, _ = press(t, m, msg)
+	}
+	if m.Tab() != GitTab || m.HelpVisible() {
+		t.Errorf("tab = %v, help = %v, want the Git tab and no help", m.Tab(), m.HelpVisible())
+	}
+	if !m.git.CapturesInput() {
+		t.Error("CapturesInput() = false, want the modal kept open")
+	}
+	if got := m.git.Err(); got != nil {
+		t.Errorf("Err() = %v, want no error from typing", got)
+	}
+
+	if _, quit := press(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); quit == nil {
+		t.Fatal("no command, want quit")
+	} else if _, ok := quit().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", quit())
+	}
+}
+
+func TestGitStageAndCommitThroughTheRoot(t *testing.T) {
+	deps := testDeps(t)
+	git := stagedGit(t, deps)
+	committed := ""
+	git.OnCommit = func(_ context.Context, message string) error {
+		committed = message
+
+		return nil
+	}
+
+	m := newSized(t, deps, 120, 40)
+	m = drain(t, m, m.Init())
+	m = update(t, m, typed('2'))
+
+	model, cmd := press(t, m, typed('s'))
+	model = drain(t, model, cmd)
+	if got := git.CallCount("Stage"); got != 1 {
+		t.Fatalf("Stage calls = %d, want 1", got)
+	}
+	if model.git.CapturesInput() {
+		t.Error("CapturesInput() = true, want the s key to stage a file")
+	}
+
+	model, _ = press(t, model, typed('c'))
+	for _, r := range "hola" {
+		model, _ = press(t, model, typed(r))
+	}
+
+	next, cmd := press(t, model, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("no command, want the commit")
+	}
+
+	next = drain(t, next, cmd)
+	if committed != "hola" {
+		t.Errorf("Commit message = %q, want %q", committed, "hola")
+	}
+	if next.git.CapturesInput() {
+		t.Error("CapturesInput() = true after the commit, want the modal closed")
+	}
+
+	// The tab switching keys work again once the modal is closed.
+	next = update(t, next, typed('1'))
+	if next.Tab() != FilesTab {
+		t.Errorf("Tab() = %v, want the root shortcuts back", next.Tab())
 	}
 }

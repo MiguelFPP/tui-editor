@@ -63,7 +63,7 @@ const (
 type Deps struct {
 	Config config.Config
 	Files  ports.FileService
-	Git    ports.GitReader
+	Git    ports.GitChanges
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -234,6 +234,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 
 		return nil, false
+	}
+
+	// A modal inside the Git panel owns every key but the quit shortcut.
+	if m.tab == GitTab && m.git.CapturesInput() {
+		if key == "ctrl+c" {
+			return tea.Quit, true
+		}
+
+		return m.forwardKey(msg), false
 	}
 
 	switch key {

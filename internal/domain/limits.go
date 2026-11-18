@@ -15,4 +15,10 @@ const (
 	MaxBranches      = 500
 	MaxStashes       = 100
 	MaxDiffFiles     = 500
+
+	// MaxCommitMessageBytes bounds the message sent to `git commit -F -`.
+	MaxCommitMessageBytes = 64 << 10
+
+	// MaxPatchBytes bounds the patch built for staging or unstaging hunks.
+	MaxPatchBytes = 1 << 20
 )

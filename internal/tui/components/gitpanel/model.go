@@ -1,14 +1,16 @@
-// Package gitpanel renders the read-only Git sections of one repository.
+// Package gitpanel renders the Git sections of one repository and stages and commits them.
 package gitpanel
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -26,7 +28,19 @@ const (
 	minRows    = 1
 
 	loadTimeout = 5 * time.Second
-	wheelStep   = 3
+	// writeTimeout bounds a stage or commit, including the repository hooks.
+	writeTimeout = 60 * time.Second
+	wheelStep    = 3
+
+	// commitRows is the height of the commit message editor.
+	commitRows = 6
+
+	// The write operations, used to label their result.
+	opStage        = "preparar"
+	opUnstage      = "quitar"
+	opStageHunks   = "preparar hunks"
+	opUnstageHunks = "quitar hunks"
+	opCommit       = "commit"
 )
 
 // Section is one navigable block of the panel.
@@ -80,6 +94,13 @@ type diffLoadedMsg struct {
 	err  error
 }
 
+// writeDoneMsg carries the outcome of one stage, unstage or commit.
+type writeDoneMsg struct {
+	seq int
+	op  string
+	err error
+}
+
 var errNoService = errors.New("gitpanel: servicio de git no configurado")
 
 var styles = struct {
@@ -105,7 +126,7 @@ func plainCells(style lipgloss.Style) lipgloss.Style {
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {
-	git ports.GitReader
+	git ports.GitChanges
 
 	section Section
 	cursors [sectionCount]int
@@ -116,12 +137,19 @@ type Model struct {
 	history       domain.CommitPage
 	historyLoaded bool
 
-	diff      domain.Diff
-	request   domain.DiffRequest
-	loaded    bool
-	staged    bool
-	diffBody  string
-	diffLines []string
+	diff       domain.Diff
+	request    domain.DiffRequest
+	loaded     bool
+	staged     bool
+	diffBody   string
+	diffLines  []string
+	hunkCursor int
+	marked     map[int]bool
+
+	writing  bool
+	writeErr error
+
+	commit commitModal
 
 	loading loadingState
 	errs    errorState
@@ -130,6 +158,13 @@ type Model struct {
 	width  int
 	height int
 	help   bool
+}
+
+// commitModal is the commit message editor, kept across an escaped modal so the draft survives.
+type commitModal struct {
+	open bool
+	err  error
+	area textarea.Model
 }
 
 type loadingState struct {
@@ -151,18 +186,51 @@ type seqState struct {
 	branches int
 	history  int
 	diff     int
+	write    int
 }
 
 // New builds the panel; Init asks for the status and the branches, nothing else.
-func New(git ports.GitReader) Model {
+func New(git ports.GitChanges) Model {
 	m := Model{
 		git:     git,
 		loading: loadingState{status: true, branches: true},
 		seqs:    seqState{status: 1, branches: 1},
+		marked:  make(map[int]bool),
+		commit:  newCommitModal(defaultWidth, defaultHeight),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
 	return m
+}
+
+// newCommitModal builds the message editor with an empty draft.
+func newCommitModal(width, height int) commitModal {
+	area := textarea.New()
+	area.Placeholder = "mensaje del commit"
+	area.ShowLineNumbers = false
+	area.CharLimit = domain.MaxCommitMessageBytes
+	area.SetVirtualCursor(true)
+	area.SetWidth(modalWidth(width))
+	area.SetHeight(modalRows(height))
+
+	return commitModal{area: area}
+}
+
+// CapturesInput reports that the modal owns the keyboard of the panel.
+func (m Model) CapturesInput() bool {
+	return m.commit.open
+}
+
+// modalWidth keeps the editor one cell inside the panel.
+func modalWidth(width int) int {
+	return max(width-1, 4)
+}
+
+// modalRows keeps the editor inside the body of the panel.
+func modalRows(height int) int {
+	body := max(height-headerRows-footerRows, minRows)
+
+	return min(max(body-2, 1), commitRows)
 }
 
 // Init requests the status and the branch list of the repository.
@@ -175,16 +243,20 @@ func (m Model) Section() Section {
 	return m.section
 }
 
-// Loading reports whether any section is still reading.
+// Loading reports whether any section is still reading or a write is in flight.
 func (m Model) Loading() bool {
-	return m.loading.status || m.loading.branches || m.loading.history || m.loading.diff
+	return m.writing || m.loading.status || m.loading.branches || m.loading.history || m.loading.diff
 }
 
-// Err returns the first active section error, if any.
+// Err returns the first active error, if any.
 func (m Model) Err() error {
 	switch {
 	case m.errs.status != nil:
 		return m.errs.status
+	case m.writeErr != nil:
+		return m.writeErr
+	case m.commit.err != nil:
+		return m.commit.err
 	case m.errs.diff != nil:
 		return m.errs.diff
 	case m.errs.branches != nil:
@@ -194,9 +266,11 @@ func (m Model) Err() error {
 	}
 }
 
-// SetSize stores the terminal size and re-renders the cached diff.
+// SetSize stores the terminal size, resizes the modal and re-renders the cached diff.
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = max(width, 0), max(height, 0)
+	m.commit.area.SetWidth(modalWidth(m.width))
+	m.commit.area.SetHeight(modalRows(m.height))
 
 	m.sync()
 }
@@ -272,8 +346,67 @@ func (m Model) diffRows() []string {
 	if m.diff.Binary {
 		header += " · binario"
 	}
+	if hunk := m.hunkLabel(); hunk != "" {
+		header += " · " + hunk
+	}
 
 	return append([]string{header}, m.diffLines...)
+}
+
+// hunkLabel describes the hunk cursor and the marks of the loaded diff.
+func (m Model) hunkLabel() string {
+	if len(m.diff.Hunks) == 0 {
+		return ""
+	}
+
+	label := fmt.Sprintf("hunk %d/%d", m.hunkCursor+1, len(m.diff.Hunks))
+	if count := len(m.selectedHunks()); count > 0 {
+		label += fmt.Sprintf(" · %d marcados", count)
+	}
+
+	return label
+}
+
+// selectedHunks returns the marked hunk indices in order, ignoring the ones out of range.
+func (m Model) selectedHunks() []int {
+	var indices []int
+
+	for index, marked := range m.marked {
+		if marked && index >= 0 && index < len(m.diff.Hunks) {
+			indices = append(indices, index)
+		}
+	}
+
+	slices.Sort(indices)
+
+	return indices
+}
+
+// moveHunk moves the hunk cursor of the loaded diff.
+func (m *Model) moveHunk(delta int) {
+	if m.section != Diff || len(m.diff.Hunks) == 0 {
+		return
+	}
+
+	m.hunkCursor = min(max(m.hunkCursor+delta, 0), len(m.diff.Hunks)-1)
+}
+
+// toggleHunk marks or unmarks the hunk under the cursor.
+func (m *Model) toggleHunk() {
+	if m.section != Diff || m.hunkCursor < 0 || m.hunkCursor >= len(m.diff.Hunks) {
+		return
+	}
+	if m.marked == nil {
+		m.marked = make(map[int]bool)
+	}
+
+	m.marked[m.hunkCursor] = !m.marked[m.hunkCursor]
+}
+
+// resetHunks clears the hunk cursor and the marks of the previous diff.
+func (m *Model) resetHunks() {
+	m.hunkCursor = 0
+	m.marked = make(map[int]bool)
 }
 
 // clamp keeps the cursor and the offset of one section inside its rows.
@@ -354,12 +487,18 @@ func describeError(err error) string {
 		return "git no está disponible"
 	case errors.Is(err, domain.ErrGitIndexLocked):
 		return "el índice de git está bloqueado"
+	case errors.Is(err, domain.ErrNoChanges):
+		return "no hay cambios preparados"
+	case errors.Is(err, domain.ErrTooLarge):
+		return "contenido demasiado grande"
 	case errors.Is(err, domain.ErrPermissionDenied):
 		return "permiso denegado"
-	case errors.Is(err, domain.ErrInvalidPath), errors.Is(err, domain.ErrInvalidArgument):
+	case errors.Is(err, domain.ErrInvalidPath):
 		return "ruta inválida"
+	case errors.Is(err, domain.ErrInvalidArgument):
+		return "argumento inválido"
 	case errors.Is(err, context.DeadlineExceeded):
-		return "tiempo de lectura agotado"
+		return "tiempo agotado"
 	case errors.Is(err, context.Canceled):
 		return "cancelado"
 	default:

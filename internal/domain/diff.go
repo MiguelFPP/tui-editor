@@ -40,6 +40,8 @@ type Diff struct {
 	Staged    bool
 	Binary    bool
 	Truncated bool
+	New       bool
+	Deleted   bool
 	Additions int
 	Deletions int
 	Hunks     []DiffHunk

@@ -7,18 +7,26 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 )
 
-// Service is the read-only Git port implemented on top of a Runner.
+// Service implements the Git ports the TUI consumes on top of a Runner.
 type Service struct {
 	root   domain.RepoPath
 	runner Runner
+
+	// write serialises the mutations of the index; lockDelay backs off before the single retry.
+	write     chan struct{}
+	lockDelay time.Duration
 }
 
-var _ ports.GitReader = (*Service)(nil)
+var (
+	_ ports.GitReader  = (*Service)(nil)
+	_ ports.GitChanges = (*Service)(nil)
+)
 
 // New validates the root and the runner without executing git.
 func New(root domain.RepoPath, runner Runner) (*Service, error) {
@@ -29,7 +37,12 @@ func New(root domain.RepoPath, runner Runner) (*Service, error) {
 		return nil, fmt.Errorf("%w: falta el runner de git", domain.ErrInvalidArgument)
 	}
 
-	return &Service{root: root, runner: runner}, nil
+	return &Service{
+		root:      root,
+		runner:    runner,
+		write:     make(chan struct{}, 1),
+		lockDelay: defaultLockDelay,
+	}, nil
 }
 
 // Status reads the bounded snapshot of the working tree.
@@ -177,6 +190,10 @@ func (s *Service) Show(ctx context.Context, hash string) (domain.CommitDetail, e
 
 // translateError maps the technical failures of git onto the domain sentinels.
 func translateError(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+
 	var runErr *RunError
 	if !errors.As(err, &runErr) {
 		return fmt.Errorf("git: %s: %w", op, err)

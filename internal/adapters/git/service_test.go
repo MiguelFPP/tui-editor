@@ -7,30 +7,92 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 )
 
-// fakeRunner is the test double of Runner; it records the arguments and answers with a canned result.
+// fakeRunner is the test double of Runner; it records the arguments, the stdin and the answers.
 type fakeRunner struct {
-	calls  [][]string
-	result Result
-	err    error
+	mu      sync.Mutex
+	calls   [][]string
+	inputs  [][]byte
+	result  Result
+	err     error
+	handler func(stdin []byte, args []string) (Result, error)
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (Result, error) {
-	f.calls = append(f.calls, append([]string(nil), args...))
+	return f.invoke(nil, args)
+}
 
-	return f.result, f.err
+func (f *fakeRunner) RunInput(_ context.Context, stdin []byte, args ...string) (Result, error) {
+	return f.invoke(stdin, args)
+}
+
+func (f *fakeRunner) invoke(stdin []byte, args []string) (Result, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, append([]string(nil), args...))
+	f.inputs = append(f.inputs, append([]byte(nil), stdin...))
+	handler, result, err := f.handler, f.result, f.err
+	f.mu.Unlock()
+
+	if handler != nil {
+		return handler(stdin, args)
+	}
+
+	return result, err
 }
 
 func (f *fakeRunner) last() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	if len(f.calls) == 0 {
 		return nil
 	}
 
 	return f.calls[len(f.calls)-1]
+}
+
+// recordedCall is one invocation with the arguments and the stdin it received.
+type recordedCall struct {
+	Args  []string
+	Stdin []byte
+}
+
+func (f *fakeRunner) Calls() []recordedCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := make([]recordedCall, 0, len(f.calls))
+	for i, args := range f.calls {
+		out = append(out, recordedCall{
+			Args:  append([]string(nil), args...),
+			Stdin: append([]byte(nil), f.inputs[i]...),
+		})
+	}
+
+	return out
+}
+
+func (f *fakeRunner) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return len(f.calls)
+}
+
+func (f *fakeRunner) lastInput() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if len(f.inputs) == 0 {
+		return nil
+	}
+
+	return f.inputs[len(f.inputs)-1]
 }
 
 // newTestService builds a Service over a fake runner.

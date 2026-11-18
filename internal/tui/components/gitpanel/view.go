@@ -12,20 +12,27 @@ func (m Model) View() string {
 	lines = append(lines, styles.title.Render(truncate(m.titleText(), m.width)))
 	lines = append(lines, m.tabs())
 
-	if m.help {
-		return strings.Join(append(lines, m.helpLines()...), "\n")
+	switch {
+	case m.help:
+		lines = append(lines, m.helpLines()...)
+	case m.commit.open:
+		lines = append(lines, m.commitLines()...)
+	default:
+		lines = append(lines, m.body()...)
+		lines = append(lines, styles.meta.Render(truncate(m.footerText(), m.width)))
 	}
-
-	lines = append(lines, m.body()...)
-	lines = append(lines, styles.meta.Render(truncate(m.footerText(), m.width)))
 
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) titleText() string {
 	switch {
+	case m.writeErr != nil:
+		return "git · error al escribir: " + describeError(m.writeErr)
 	case m.errs.status != nil:
 		return "git · error: " + describeError(m.errs.status)
+	case m.writing:
+		return "git · escribiendo…"
 	case m.loading.status:
 		return "git · cargando…"
 	case m.status.Unborn:
@@ -145,10 +152,23 @@ func (m Model) stateLine() (string, bool) {
 }
 
 func (m Model) footerText() string {
-	parts := []string{
-		"tab: sección", "j/k: mover", "enter: diff del archivo",
-		"d: " + m.modeLabel(), "r: refrescar", "?: ayuda",
+	parts := []string{"tab: sección", "j/k: mover"}
+
+	switch m.section {
+	case Changes:
+		parts = append(parts, "enter: diff del archivo", "s: preparar", "u: quitar", "c: commit")
+	case Diff:
+		parts = append(parts, "[ ]: hunk", "espacio: marcar", "d: "+m.modeLabel())
+
+		switch {
+		case m.staged:
+			parts = append(parts, "u: quitar hunks")
+		case m.loaded:
+			parts = append(parts, "s: preparar hunks")
+		}
 	}
+
+	parts = append(parts, "r: refrescar", "?: ayuda")
 
 	switch {
 	case m.section == Diff && m.diff.Truncated:
@@ -172,16 +192,42 @@ func (m Model) modeLabel() string {
 
 func (m Model) helpLines() []string {
 	return []string{
-		styles.meta.Render("ayuda · panel de git (F5: solo lectura)"),
+		styles.meta.Render("ayuda · panel de git"),
 		"",
 		"  tab / shift+tab   cambiar de sección",
 		"  j / k, ↑ / ↓      mover el cursor",
 		"  enter             cargar el diff del archivo seleccionado",
 		"  d                 alternar entre staged (" + m.modeLabel() + ") y worktree",
+		"  s                 preparar el archivo; en Diff, los hunks marcados",
+		"  u                 quitar el archivo; en Diff, los hunks marcados",
+		"  c                 abrir el editor del mensaje del commit",
+		"  [ / ]             mover el cursor entre hunks (Diff)",
+		"  espacio           marcar o desmarcar el hunk (Diff)",
 		"  r                 refrescar estado, ramas e historial",
 		"  esc               cerrar la ayuda o volver a Cambios",
 		"  ?                 mostrar u ocultar esta ayuda",
+		"",
+		styles.meta.Render("  commit: ctrl+s confirma, esc cancela y enter añade una línea"),
 	}
+}
+
+// commitLines renders the commit editor over the whole body of the panel.
+func (m Model) commitLines() []string {
+	lines := make([]string, 0, m.bodyHeight()+footerRows)
+
+	lines = append(lines, styles.title.Render(truncate("commit · mensaje", m.width)))
+	lines = append(lines, strings.Split(m.commit.area.View(), "\n")...)
+
+	if m.writing {
+		lines = append(lines, styles.meta.Render(truncate("escribiendo el commit…", m.width)))
+	}
+	if m.commit.err != nil {
+		lines = append(lines, styles.fail.Render(truncate("error: "+describeError(m.commit.err), m.width)))
+	}
+
+	lines = append(lines, styles.meta.Render(truncate("ctrl+s: confirmar · esc: cancelar · enter: nueva línea", m.width)))
+
+	return pad(lines, m.bodyHeight()+footerRows)
 }
 
 // pad fills the body up to the available height, so the layout stays stable.

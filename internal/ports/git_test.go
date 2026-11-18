@@ -14,6 +14,17 @@ var (
 	_ ports.GitWriter = (ports.GitService)(nil)
 )
 
+// The writer half is the sum of its subinterfaces, and the change flow is a subset of it.
+var (
+	_ ports.GitStager       = ports.GitWriter(nil)
+	_ ports.GitCommitter    = ports.GitWriter(nil)
+	_ ports.GitBranchWriter = ports.GitWriter(nil)
+	_ ports.GitStashWriter  = ports.GitWriter(nil)
+	_ ports.GitMergeWriter  = ports.GitWriter(nil)
+	_ ports.GitSyncWriter   = ports.GitWriter(nil)
+	_ ports.GitChanges      = ports.GitService(nil)
+)
+
 type readerOnly struct{}
 
 func (readerOnly) Status(context.Context) (domain.GitStatus, error) {
@@ -57,3 +68,57 @@ func TestGitServiceRequiresBothHalves(t *testing.T) {
 		t.Fatal("ports.GitService must require the writer half as well")
 	}
 }
+
+// changesOnly is a reader that can stage and commit, but nothing else.
+type changesOnly struct{ readerOnly }
+
+func (changesOnly) Stage(context.Context, []domain.RelPath) error          { return nil }
+func (changesOnly) Unstage(context.Context, []domain.RelPath) error        { return nil }
+func (changesOnly) StageHunks(context.Context, domain.Diff, []int) error   { return nil }
+func (changesOnly) UnstageHunks(context.Context, domain.Diff, []int) error { return nil }
+func (changesOnly) Commit(context.Context, string) error                   { return nil }
+
+func TestGitChangesIsOnlyTheReadAndStageHalf(t *testing.T) {
+	var value any = changesOnly{}
+
+	if _, ok := value.(ports.GitChanges); !ok {
+		t.Fatal("a reader with staging and commit must satisfy ports.GitChanges")
+	}
+	if _, ok := value.(ports.GitWriter); ok {
+		t.Fatal("ports.GitWriter must also require the branch, stash, merge and sync halves")
+	}
+	if _, ok := value.(ports.GitService); ok {
+		t.Fatal("ports.GitService must require the full writer half")
+	}
+	if _, ok := value.(ports.GitCommitter); !ok {
+		t.Fatal("changesOnly must satisfy ports.GitCommitter")
+	}
+}
+
+func TestGitWriterNeedsEveryHalf(t *testing.T) {
+	var value any = stagerOnly{}
+
+	if _, ok := value.(ports.GitStager); !ok {
+		t.Fatal("stagerOnly must satisfy ports.GitStager")
+	}
+	if _, ok := value.(ports.GitCommitter); ok {
+		t.Error("ports.GitCommitter must not be satisfied by the staging methods alone")
+	}
+	if _, ok := value.(ports.GitChanges); ok {
+		t.Error("ports.GitChanges must require the reader and the commit half")
+	}
+	if _, ok := value.(ports.GitService); ok {
+		t.Error("ports.GitService must require the full writer half")
+	}
+	if _, ok := value.(ports.GitWriter); ok {
+		t.Error("ports.GitWriter must require the branch, stash, merge and sync halves")
+	}
+}
+
+// stagerOnly implements the staging half and nothing else.
+type stagerOnly struct{}
+
+func (stagerOnly) Stage(context.Context, []domain.RelPath) error          { return nil }
+func (stagerOnly) Unstage(context.Context, []domain.RelPath) error        { return nil }
+func (stagerOnly) StageHunks(context.Context, domain.Diff, []int) error   { return nil }
+func (stagerOnly) UnstageHunks(context.Context, domain.Diff, []int) error { return nil }

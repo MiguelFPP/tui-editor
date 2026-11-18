@@ -1,9 +1,11 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -58,6 +60,16 @@ func helperProcess(mode string) int {
 		time.Sleep(time.Minute)
 
 		return 0
+	case "cat":
+		if _, err := io.Copy(os.Stdout, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+
+			return 1
+		}
+
+		return 0
+	case "drop":
+		return 0 // exits without reading stdin, so the parent copy hits a broken pipe
 	default:
 		fmt.Fprintf(os.Stderr, "modo de ayuda desconocido: %s\n", mode)
 
@@ -370,4 +382,101 @@ func countEntries(env []string, entry string) int {
 	}
 
 	return count
+}
+
+func TestExecRunnerRunInputFeedsStdin(t *testing.T) {
+	runner := helperRunner(t, "cat")
+	payload := []byte("titulo\n\ncuerpo con ñ\n")
+
+	result, err := runner.RunInput(context.Background(), payload, "commit", "-F", "-")
+	if err != nil {
+		t.Fatalf("RunInput() error = %v, want nil", err)
+	}
+	if string(result.Stdout) != string(payload) {
+		t.Errorf("stdout = %q, want the payload back", result.Stdout)
+	}
+	if result.Code != 0 || result.Truncated {
+		t.Errorf("result = %+v, want a clean exit", result)
+	}
+}
+
+func TestExecRunnerWithoutInputClosesStdin(t *testing.T) {
+	runner := helperRunner(t, "cat")
+
+	result, err := runner.Run(context.Background(), "status")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if len(result.Stdout) != 0 {
+		t.Errorf("stdout = %q, want nothing: Run never writes to stdin", result.Stdout)
+	}
+}
+
+func TestExecRunnerRejectsUnusableInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin []byte
+		want  error
+	}{
+		{name: "nul", stdin: []byte("titulo\x00cuerpo"), want: domain.ErrInvalidArgument},
+		{name: "too large", stdin: bytes.Repeat([]byte("x"), MaxInputBytes+1), want: domain.ErrTooLarge},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := helperRunner(t, "cat")
+
+			_, err := runner.RunInput(context.Background(), tc.stdin, "commit", "-F", "-")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("RunInput() error = %v, want %v", err, tc.want)
+			}
+
+			var runErr *RunError
+			if errors.As(err, &runErr) {
+				t.Errorf("RunInput() error = %v, want a validation error, not a *RunError", err)
+			}
+		})
+	}
+}
+
+func TestExecRunnerAcceptsTheInputLimit(t *testing.T) {
+	runner := helperRunner(t, "cat")
+	payload := bytes.Repeat([]byte("x"), MaxInputBytes)
+
+	result, err := runner.RunInput(context.Background(), payload, "commit", "-F", "-")
+	if err != nil {
+		t.Fatalf("RunInput() error = %v, want nil", err)
+	}
+	if len(result.Stdout) != len(payload) {
+		t.Errorf("len(stdout) = %d, want %d", len(result.Stdout), len(payload))
+	}
+}
+
+func TestExecRunnerIgnoresABrokenPipeOfAProcessThatExitedCleanly(t *testing.T) {
+	runner := helperRunner(t, "drop")
+
+	result, err := runner.RunInput(context.Background(), bytes.Repeat([]byte("x"), MaxInputBytes), "commit", "-F", "-")
+	if err != nil {
+		t.Fatalf("RunInput() error = %v, want nil: git closed stdin and still exited cleanly", err)
+	}
+	if result.Code != 0 {
+		t.Errorf("Code = %d, want 0", result.Code)
+	}
+}
+
+func TestExecRunnerKeepsTheCallerDeadline(t *testing.T) {
+	runner := helperRunner(t, "wait")
+	runner.Timeout = time.Minute
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := runner.RunInput(ctx, []byte("datos"), "commit", "-F", "-")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RunInput() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("RunInput() took %v, want the caller deadline to win over the runner timeout", elapsed)
+	}
 }
