@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +65,9 @@ const (
 	// The notices shown when a network write succeeds.
 	noticeFetch = "fetch completado"
 	noticePush  = "push completado"
+
+	// maxErrorCells bounds the line the panel shows for a failure it does not recognise.
+	maxErrorCells = 160
 )
 
 // Section is one navigable block of the panel.
@@ -181,6 +185,7 @@ type Model struct {
 	marked     map[int]bool
 
 	writing  bool
+	writeOp  string
 	writeErr error
 	notice   string
 
@@ -194,7 +199,21 @@ type Model struct {
 
 	width  int
 	height int
-	help   bool
+	bounds image.Rectangle
+
+	// rowRects holds the rows the active section can show, tabRects the section labels of the
+	// header and hunkRows the row span of every hunk of the loaded diff.
+	rowRects [sectionCount][]image.Rectangle
+	tabRects [sectionCount]image.Rectangle
+	hunkRows []rowSpan
+
+	help bool
+}
+
+// rowSpan is a half-open range of rows of the diff section.
+type rowSpan struct {
+	start int
+	end   int
 }
 
 // commitModal is the commit message editor, kept across an escaped modal so the draft survives.
@@ -386,27 +405,52 @@ func (m Model) Err() error {
 	}
 }
 
-// SetSize stores the terminal size, resizes the modals and re-renders the cached diff.
+// SetSize stores the terminal size, keeping the origin of the panel.
 func (m *Model) SetSize(width, height int) {
+	m.SetBounds(m.bounds.Min.X, m.bounds.Min.Y, width, height)
+}
+
+// SetBounds places the panel in the terminal, resizes the modals and re-renders the cached diff.
+func (m *Model) SetBounds(x, y, width, height int) {
 	m.width, m.height = max(width, 0), max(height, 0)
+	m.bounds = image.Rect(x, y, x+m.width, y+m.height)
 	m.commit.area.SetWidth(modalWidth(m.width))
 	m.commit.area.SetHeight(modalRows(m.height))
 	m.prompt.input.SetWidth(promptWidth(m.width))
 
+	m.markTabs()
 	m.sync()
 }
 
-// sync rebuilds the cached diff body; View only composes it.
+// sync rebuilds the cached diff body and the hit-test rectangles; View only composes them.
 func (m *Model) sync() {
 	if !m.loaded {
-		m.diffBody, m.diffLines = "", nil
-
-		return
+		m.diffBody, m.diffLines, m.hunkRows = "", nil, nil
+	} else {
+		m.diffBody = common.RenderDiff(m.diff, m.width, true)
+		m.diffLines = strings.Split(m.diffBody, "\n")
+		m.hunkRows = diffSpans(m.diff)
 	}
 
-	m.diffBody = common.RenderDiff(m.diff, m.width, true)
-	m.diffLines = strings.Split(m.diffBody, "\n")
 	m.clamp(m.section)
+}
+
+// diffSpans locates every hunk inside the rows of the diff section, its title line included.
+func diffSpans(diff domain.Diff) []rowSpan {
+	if diff.IsEmpty() || diff.Binary {
+		return nil
+	}
+
+	spans := make([]rowSpan, 0, len(diff.Hunks))
+	row := 1 // the first row of the section names the diff
+
+	for _, hunk := range diff.Hunks {
+		rows := len(hunk.Lines) + 1
+		spans = append(spans, rowSpan{start: row, end: row + rows})
+		row += rows
+	}
+
+	return spans
 }
 
 // rows returns the body lines of one section, already formatted.
@@ -551,6 +595,91 @@ func (m *Model) clamp(section Section) {
 	m.cursors[section] = min(max(m.cursors[section], 0), max(rows-1, 0))
 	m.offsets[section] = min(max(m.offsets[section], 0), max(rows-m.bodyHeight(), 0))
 	m.scrollToCursor(section)
+	m.markRows(section, rows)
+}
+
+// markRows stores the rectangle of every row the section can show; the offset maps them at click
+// time, so scrolling does not invalidate them.
+func (m *Model) markRows(section Section, rows int) {
+	if section >= sectionCount {
+		return
+	}
+
+	m.rowRects[section] = nil
+
+	count := min(m.bodyHeight(), rows)
+	if count <= 0 || m.width <= 0 {
+		return
+	}
+
+	top := m.bounds.Min.Y + headerRows
+	rects := make([]image.Rectangle, 0, count)
+	for row := 0; row < count; row++ {
+		rects = append(rects, image.Rect(m.bounds.Min.X, top+row, m.bounds.Max.X, top+row+1))
+	}
+
+	m.rowRects[section] = rects
+}
+
+// markTabs stores the rectangle of every section tab the header can show.
+func (m *Model) markTabs() {
+	m.tabRects = [sectionCount]image.Rectangle{}
+	if m.width <= 0 || m.height < headerRows {
+		return
+	}
+
+	row := m.bounds.Min.Y + 1
+	column := m.bounds.Min.X
+
+	for section := Section(0); section < sectionCount; section++ {
+		label := section.String()
+		if column-m.bounds.Min.X+len([]rune(label)) > m.width {
+			return // the cut labels of a narrow panel are not clickable
+		}
+
+		m.tabRects[section] = image.Rect(column, row, column+len([]rune(label)), row+1)
+		column += len([]rune(label)) + len([]rune(tabSeparator))
+	}
+}
+
+// rowAt maps terminal coordinates to the row index of the active section.
+func (m Model) rowAt(point image.Point) (int, bool) {
+	for index, rect := range m.rowRects[m.section] {
+		if !point.In(rect) {
+			continue
+		}
+
+		row := m.offsets[m.section] + index
+		if row >= len(m.active()) {
+			return 0, false
+		}
+
+		return row, true
+	}
+
+	return 0, false
+}
+
+// tabAt maps terminal coordinates to one of the visible section tabs.
+func (m Model) tabAt(point image.Point) (Section, bool) {
+	for section := Section(0); section < sectionCount; section++ {
+		if m.tabRects[section].Dx() > 0 && point.In(m.tabRects[section]) {
+			return section, true
+		}
+	}
+
+	return m.section, false
+}
+
+// hunkAt maps a row of the diff section to the hunk that covers it.
+func (m Model) hunkAt(row int) (int, bool) {
+	for index, span := range m.hunkRows {
+		if row >= span.start && row < span.end {
+			return index, true
+		}
+	}
+
+	return 0, false
 }
 
 // scrollToCursor moves the offset so the cursor stays visible.
@@ -676,8 +805,28 @@ func describeError(err error) string {
 	case errors.Is(err, context.Canceled):
 		return "cancelado"
 	default:
-		return err.Error()
+		return summarize(err)
 	}
+}
+
+// summarize reduces an unknown failure to one line without control characters: the raw stderr of
+// git never reaches the panel, it stays in the log.
+func summarize(err error) string {
+	line, _, _ := strings.Cut(err.Error(), "\n")
+
+	return truncate(strings.TrimSpace(strings.Map(dropControl, line)), maxErrorCells)
+}
+
+// dropControl keeps the printable runes, plus the tab the renderer already converts.
+func dropControl(r rune) rune {
+	if r == '\t' {
+		return r
+	}
+	if r < ' ' || r == 0x7f {
+		return -1
+	}
+
+	return r
 }
 
 // fileRow renders one porcelain status entry with its conflict and rename markers.

@@ -7,6 +7,12 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 )
 
+// tabSeparator joins the section labels; the mouse hit-testing relies on it.
+const tabSeparator = " │ "
+
+// titleSeparator joins the fields of the header row.
+const titleSeparator = " · "
+
 // View composes the header, the section tabs and the body of the active section.
 func (m Model) View() string {
 	lines := make([]string, 0, m.bodyHeight()+headerRows+footerRows)
@@ -16,7 +22,9 @@ func (m Model) View() string {
 
 	switch {
 	case m.help:
-		lines = append(lines, m.helpLines()...)
+		for _, line := range m.helpLines() {
+			lines = append(lines, truncate(line, m.width))
+		}
 	case m.confirm.open:
 		lines = append(lines, m.confirmLines()...)
 	case m.prompt.open:
@@ -31,28 +39,31 @@ func (m Model) View() string {
 	return strings.Join(lines, "\n")
 }
 
-// titleText is the header of the panel, with the conflict banner appended in the same row.
+// titleText is the header of the panel: the repository identity, the state of the panel and the
+// conflict banner, always in the same row.
 func (m Model) titleText() string {
-	return m.baseTitle() + conflictLabel(len(m.status.Conflicts()))
-}
-
-func (m Model) baseTitle() string {
-	switch {
-	case m.writeErr != nil:
-		return "git · error al escribir: " + describeError(m.writeErr)
-	case m.errs.status != nil:
-		return "git · error: " + describeError(m.errs.status)
-	case m.writing:
-		return "git · escribiendo…"
-	case m.loading.status:
-		return "git · cargando…"
-	case m.status.Unborn:
-		return "git · rama " + m.status.Branch + " · sin commits"
-	case m.status.Detached:
-		return "git · HEAD desacoplado · " + changeLabel(len(m.status.Files))
+	parts := []string{"git"}
+	if state := m.stateLabel(); state != "" {
+		parts = append(parts, state) // the state goes first: a narrow panel must still show it
 	}
 
-	parts := []string{"git", "rama " + m.status.Branch}
+	title := strings.Join(append(parts, m.identityLabels()...), titleSeparator)
+
+	return title + conflictLabel(len(m.status.Conflicts()))
+}
+
+// identityLabels names the branch, its upstream and how far it is from it.
+func (m Model) identityLabels() []string {
+	switch {
+	case m.status.Unborn:
+		return []string{"rama " + m.status.Branch, "sin commits"}
+	case m.status.Detached:
+		return []string{"HEAD desacoplado", changeLabel(len(m.status.Files))}
+	case m.status.Branch == "":
+		return nil
+	}
+
+	parts := []string{"rama " + m.status.Branch}
 	if m.status.Upstream != "" {
 		parts = append(parts, m.status.Upstream)
 	}
@@ -63,7 +74,31 @@ func (m Model) baseTitle() string {
 		parts = append(parts, "↓"+strconv.Itoa(m.status.Behind))
 	}
 
-	return strings.Join(append(parts, changeLabel(len(m.status.Files))), " · ")
+	return append(parts, changeLabel(len(m.status.Files)))
+}
+
+// stateLabel reports the operation in flight or the failure that stopped the panel; the actionable
+// message stays in the body, the header only marks that something went wrong.
+func (m Model) stateLabel() string {
+	switch {
+	case m.Err() != nil:
+		return "error"
+	case m.writing:
+		return m.writeLabel()
+	case m.loading.status:
+		return "cargando…"
+	default:
+		return ""
+	}
+}
+
+// writeLabel names the write in flight, also when the key that started it is unknown.
+func (m Model) writeLabel() string {
+	if m.writeOp == "" {
+		return "escribiendo…"
+	}
+
+	return "escribiendo: " + m.writeOp
 }
 
 // conflictCount names the pending conflicts.
@@ -81,7 +116,7 @@ func conflictLabel(count int) string {
 		return ""
 	}
 
-	return " · " + conflictCount(count) + " · o/t/A"
+	return titleSeparator + conflictCount(count) + titleSeparator + "o/t/A"
 }
 
 func changeLabel(count int) string {
@@ -102,7 +137,7 @@ func (m Model) tabs() string {
 	}
 
 	// The plain text decides the cut: ANSI escapes must never reach the rune limit.
-	joined := strings.Join(labels, " │ ")
+	joined := strings.Join(labels, tabSeparator)
 	if width := m.width; width > 0 && len([]rune(joined)) > width {
 		return truncate(joined, width)
 	}
@@ -118,7 +153,7 @@ func (m Model) tabs() string {
 		rendered = append(rendered, styles.tab.Render(label))
 	}
 
-	return strings.Join(rendered, " │ ")
+	return strings.Join(rendered, tabSeparator)
 }
 
 // body renders the visible window of the active section.
@@ -148,6 +183,9 @@ func (m Model) body() []string {
 
 // stateLine is the message that replaces the rows while loading or when there is nothing to show.
 func (m Model) stateLine() (string, bool) {
+	if m.writeErr != nil {
+		return styles.fail.Render(truncate("error al escribir: "+describeError(m.writeErr), m.width)), true
+	}
 	if err := m.sectionError(m.section); err != nil {
 		return styles.fail.Render(truncate("error: "+describeError(err), m.width)), true
 	}
@@ -237,33 +275,66 @@ func (m Model) modeLabel() string {
 	return "worktree"
 }
 
+// helpLines documents the panel by section, plus the keys every modal owns.
 func (m Model) helpLines() []string {
-	return []string{
-		styles.meta.Render("ayuda · panel de git"),
+	lines := []string{
+		"ayuda · panel de git",
 		"",
-		"  tab / shift+tab   cambiar de sección",
-		"  j / k, ↑ / ↓      mover el cursor",
-		"  enter             cargar el diff; en Ramas hace checkout y en Stash aplica la entrada",
-		"  d                 alternar entre staged (" + m.modeLabel() + ") y worktree",
-		"  s                 preparar el archivo; en Diff, los hunks marcados",
-		"  u                 quitar el archivo; en Diff, los hunks marcados",
-		"  c                 abrir el editor del mensaje del commit",
-		"  n                 crear una rama: nombre y punto de partida opcional",
-		"  x                 borrar la rama o descartar el stash seleccionados",
-		"  m                 fusionar la rama seleccionada en la actual",
-		"  z                 guardar los cambios en el stash; en Stash, pop de la entrada",
-		"  o / t             resolver el conflicto con ours o con theirs",
-		"  A                 abortar el merge en curso",
-		"  f / p / P         fetch, pull y push",
-		"  [ / ]             mover el cursor entre hunks (Diff)",
-		"  espacio           marcar o desmarcar el hunk (Diff)",
+		" general",
+		"  tab / shift+tab   cambiar de sección (también con clic en la pestaña)",
+		"  j / k, ↑ / ↓      mover el cursor; la rueda desplaza la lista",
 		"  r                 refrescar estado, ramas, stash e historial",
+		"  f / p / P         fetch, pull y push",
 		"  esc               cerrar la ayuda o volver a Cambios",
 		"  ?                 mostrar u ocultar esta ayuda",
 		"",
-		styles.meta.Render("  commit: ctrl+s confirma, esc cancela y enter añade una línea"),
-		styles.meta.Render("  prompt y confirmación: enter confirma, esc cancela"),
 	}
+	lines = append(lines, m.helpSection(Changes,
+		"  enter             cargar el diff del archivo",
+		"  s / u             preparar el archivo o quitar el archivo seleccionado",
+		"  c                 abrir el editor del mensaje del commit",
+		"  z                 guardar los cambios en el stash",
+		"  o / t             resolver el conflicto con ours o con theirs",
+		"  A                 abortar el merge en curso",
+	)...)
+	lines = append(lines, m.helpSection(Diff,
+		"  d                 alternar entre worktree y staged",
+		"  [ / ]             mover el cursor entre hunks",
+		"  espacio           marcar o desmarcar el hunk",
+		"  s / u             preparar o quitar los hunks marcados",
+	)...)
+	lines = append(lines, m.helpSection(Branches,
+		"  enter             checkout de la rama seleccionada",
+		"  n                 crear una rama: nombre y punto de partida opcional",
+		"  x                 borrar la rama seleccionada",
+		"  m                 fusionar la rama seleccionada en la actual",
+	)...)
+	lines = append(lines, m.helpSection(Stash,
+		"  enter             aplicar la entrada seleccionada",
+		"  z                 pop de la entrada seleccionada",
+		"  x                 descartar la entrada seleccionada",
+	)...)
+	lines = append(lines, m.helpSection(History,
+		"  j / k, ↑ / ↓      recorrer los commits (solo lectura)",
+	)...)
+
+	return append(lines,
+		"",
+		" modales",
+		"  commit: ctrl+s confirma, esc cancela, enter añade una línea",
+		"  prompt y confirmación: enter confirma, esc cancela",
+		"  confirmar un borrado: y o enter confirma, n o esc cancela",
+	)
+}
+
+// helpSection renders the heading of one section plus its keys; the active one is marked.
+func (m Model) helpSection(section Section, keys ...string) []string {
+	heading := " " + section.String()
+	if section == m.section {
+		heading += " · sección actual"
+	}
+
+	return append([]string{heading}, append(keys, "")...)
 }
 
 // commitLines renders the commit editor over the whole body of the panel.

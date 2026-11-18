@@ -3,6 +3,7 @@ package gitpanel
 import (
 	"context"
 	"fmt"
+	"image"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.applyWriteDone(msg)
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
+	case tea.MouseClickMsg:
+		return m, m.handleClick(msg.Mouse())
 	case tea.MouseWheelMsg:
 		m.handleWheel(msg.Mouse())
 	default:
@@ -59,6 +62,34 @@ func (m *Model) handleWheel(ev tea.Mouse) {
 
 	rows := len(m.rows(m.section))
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
+}
+
+// handleClick selects the row under the cursor; in Diff it also moves the hunk cursor to the hunk
+// that covers the row, and it never stages anything.
+func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
+	if ev.Button != tea.MouseLeft || m.help || m.CapturesInput() {
+		return nil
+	}
+
+	point := image.Pt(ev.X, ev.Y)
+	if section, ok := m.tabAt(point); ok {
+		return m.showSection(section)
+	}
+
+	row, ok := m.rowAt(point)
+	if !ok {
+		return nil
+	}
+
+	m.cursors[m.section] = row
+	m.scrollToCursor(m.section)
+	if m.section == Diff {
+		if hunk, ok := m.hunkAt(row); ok {
+			m.hunkCursor = hunk
+		}
+	}
+
+	return nil
 }
 
 // handleKey routes the keyboard of the open modal first, then the sections.
@@ -148,10 +179,15 @@ func (m *Model) unstageKey() tea.Cmd {
 
 // goSection moves the focus and loads the sections that are read on demand.
 func (m *Model) goSection(delta int) tea.Cmd {
-	m.section = Section((int(m.section) + delta + sectionCount) % sectionCount)
-	m.clamp(m.section)
+	return m.showSection(Section((int(m.section) + delta + sectionCount) % sectionCount))
+}
 
-	switch m.section {
+// showSection focuses one section and loads the ones that are read on demand.
+func (m *Model) showSection(section Section) tea.Cmd {
+	m.section = section
+	m.clamp(section)
+
+	switch section {
 	case Stash:
 		if !m.stashesLoaded {
 			m.stashesLoaded = true
@@ -225,6 +261,7 @@ func (m *Model) toggleStaged() tea.Cmd {
 func (m *Model) refresh() tea.Cmd {
 	commands := make([]tea.Cmd, 0, 5)
 
+	m.writeErr = nil // an explicit refresh clears the failure of the last write
 	m.seqs.status++
 	m.loading.status = true
 	commands = append(commands, loadStatus(m.git, m.seqs.status))
@@ -298,6 +335,7 @@ func (m *Model) startWrite(op string, run func(context.Context, ports.GitService
 
 	m.seqs.write++
 	m.writing = true
+	m.writeOp = op
 	m.writeErr = nil
 	m.notice = ""
 
@@ -311,6 +349,7 @@ func (m *Model) applyWriteDone(msg writeDoneMsg) tea.Cmd {
 	}
 
 	m.writing = false
+	m.writeOp = ""
 	m.writeErr = msg.err
 	if msg.err != nil {
 		m.showWriteFailure(msg.op, msg.err)
@@ -621,7 +660,13 @@ func (m *Model) handleCommitKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+s":
 		return m.submitCommit()
+	case "tab", "shift+tab":
+		return nil // the modal traps the focus: tab never leaves it
 	case "esc":
+		if m.writing {
+			return nil // the commit owns the modal until it answers
+		}
+
 		m.commit.open = false
 		m.commit.err = nil
 
@@ -665,7 +710,13 @@ func (m *Model) handlePromptKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		return m.submitPrompt()
+	case "tab", "shift+tab":
+		return nil
 	case "esc":
+		if m.writing {
+			return nil
+		}
+
 		m.cancelPrompt()
 
 		return nil
@@ -751,7 +802,13 @@ func (m *Model) handleConfirmKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "y", "enter":
 		return m.submitConfirm()
+	case "tab", "shift+tab":
+		return nil
 	case "n", "esc":
+		if m.writing {
+			return nil
+		}
+
 		m.confirm = confirmModal{}
 
 		return nil

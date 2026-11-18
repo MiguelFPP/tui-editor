@@ -45,7 +45,7 @@ func (m *Model) resize() {
 	if m.hasEditor {
 		m.editor.SetSize(editorW, body)
 	}
-	m.git.SetSize(width, body)
+	m.git.SetBounds(0, headerRows, width, body)
 
 	m.treeRect = image.Rect(0, headerRows, treeW, headerRows+body)
 	m.editorRect = image.Rect(treeW, headerRows, width, headerRows+body)

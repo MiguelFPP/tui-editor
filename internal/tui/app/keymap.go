@@ -27,8 +27,7 @@ func helpLines() []string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, "git: tab cambia de sección, enter carga el diff, d alterna staged, r refresca")
-	lines = append(lines, "git: s/u preparan o quitan archivos y hunks, c abre el commit, ctrl+s lo confirma")
+	lines = append(lines, "git: 2 abre la pestaña; dentro, ? documenta cada sección y sus modales")
 
 	return lines
 }
