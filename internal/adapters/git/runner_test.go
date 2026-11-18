@@ -1,0 +1,373 @@
+package git
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/MiguelFPP/tui-editor/internal/domain"
+)
+
+// helperEnv turns the test binary into a fake git process; TestMain routes on it.
+const helperEnv = "TUI_EDITOR_GIT_HELPER"
+
+func TestMain(m *testing.M) {
+	if mode := os.Getenv(helperEnv); mode != "" {
+		os.Exit(helperProcess(mode))
+	}
+
+	os.Exit(m.Run())
+}
+
+// helperProcess emulates the behaviours the runner must survive without needing a real git.
+func helperProcess(mode string) int {
+	switch mode {
+	case "args":
+		fmt.Println(strings.Join(os.Args[1:], "\n"))
+
+		return 0
+	case "env":
+		for _, entry := range os.Environ() {
+			fmt.Println(entry)
+		}
+
+		return 0
+	case "fail":
+		fmt.Fprintln(os.Stderr, "fatal: not a git repository (or any of the parent directories): .git")
+
+		return 128
+	case "flood":
+		for range 64 {
+			fmt.Print(strings.Repeat("x", 1024))
+		}
+
+		return 0
+	case "flooderr":
+		for range 64 {
+			fmt.Fprint(os.Stderr, strings.Repeat("e", 1024))
+		}
+
+		return 0
+	case "wait":
+		time.Sleep(time.Minute)
+
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "modo de ayuda desconocido: %s\n", mode)
+
+		return 2
+	}
+}
+
+// helperRunner builds an ExecRunner that runs the test binary instead of git.
+func helperRunner(t *testing.T, mode string) *ExecRunner {
+	t.Helper()
+
+	t.Setenv(helperEnv, mode)
+
+	root, err := domain.NewRepoPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRepoPath() error = %v, want nil", err)
+	}
+
+	runner := NewExecRunner(root)
+	runner.Git = os.Args[0]
+
+	return runner
+}
+
+func TestExecRunnerBuildsTheExactGlobalPrefix(t *testing.T) {
+	runner := helperRunner(t, "args")
+	root := runner.Root.String()
+
+	result, err := runner.Run(context.Background(), "status", "--porcelain=v2", "-z")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if result.Code != 0 || result.Truncated {
+		t.Errorf("result = %+v, want a clean exit", result)
+	}
+
+	args := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
+	want := []string{
+		"-C", root,
+		"--no-pager",
+		"-c", "core.quotepath=false",
+		"-c", "core.fsmonitor=false",
+		"-c", "color.ui=false",
+		"-c", "safe.directory=" + root,
+		"status", "--porcelain=v2", "-z",
+	}
+	if !slices.Equal(args, want) {
+		t.Errorf("argv = %q\nwant   %q", args, want)
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "safe.directory=*") {
+			t.Fatalf("argv = %q must never allow every directory", args)
+		}
+	}
+}
+
+func TestExecRunnerFiltersTheEnvironment(t *testing.T) {
+	for _, name := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_COMMON_DIR",
+	} {
+		t.Setenv(name, "/tmp/otro-repositorio")
+	}
+	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
+
+	runner := helperRunner(t, "env")
+
+	result, err := runner.Run(context.Background(), "status")
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+
+	env := strings.Split(string(result.Stdout), "\n")
+	for _, name := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_COMMON_DIR",
+	} {
+		if strings.Contains(string(result.Stdout), name+"=") {
+			t.Errorf("the environment kept %s: %v", name, env)
+		}
+	}
+
+	for _, want := range []string{
+		"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat",
+		"PAGER=cat", "LC_ALL=C", "LANG=C", "LC_MESSAGES=C",
+	} {
+		if got := countEntries(env, want); got != 1 {
+			t.Errorf("the environment has %d entries for %q, want exactly 1: the parent value must not survive", got, want)
+		}
+	}
+}
+
+func TestExecRunnerReportsExitStatusAndStderr(t *testing.T) {
+	runner := helperRunner(t, "fail")
+
+	result, err := runner.Run(context.Background(), "status")
+
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("Run() error = %v, want *RunError", err)
+	}
+	if runErr.Code != 128 {
+		t.Errorf("Code = %d, want 128", runErr.Code)
+	}
+	if !strings.Contains(runErr.Stderr, "not a git repository") {
+		t.Errorf("Stderr = %q, want the git message", runErr.Stderr)
+	}
+	if !strings.Contains(runErr.Error(), "salida 128") {
+		t.Errorf("Error() = %q, want the exit status", runErr.Error())
+	}
+	if result.Code != 128 {
+		t.Errorf("Result.Code = %d, want 128", result.Code)
+	}
+	if runErr.Err != nil {
+		t.Errorf("RunError.Err = %v, want nil: the exit status is not an error chain", runErr.Err)
+	}
+	if len(runErr.Args) != 1 || runErr.Args[0] != "status" {
+		t.Errorf("Args = %q, want the subcommand only", runErr.Args)
+	}
+}
+
+func TestExecRunnerMissingBinary(t *testing.T) {
+	root, err := domain.NewRepoPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRepoPath() error = %v, want nil", err)
+	}
+
+	runner := NewExecRunner(root)
+	runner.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+
+	_, err = runner.Run(context.Background(), "status")
+
+	var runErr *RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("Run() error = %v, want *RunError", err)
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("Run() error = %v, want it to wrap %v", err, exec.ErrNotFound)
+	}
+	if !strings.Contains(runErr.Error(), "executable file not found") {
+		t.Errorf("Error() = %q, want the lookup failure", runErr.Error())
+	}
+
+	runner.LookPath = func(string) (string, error) { return "", nil }
+	if _, err := runner.Run(context.Background(), "status"); !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("Run() with an empty binary path = %v, want %v", err, exec.ErrNotFound)
+	}
+}
+
+func TestExecRunnerBoundsOutputAndMarksTruncation(t *testing.T) {
+	t.Run("stdout", func(t *testing.T) {
+		runner := helperRunner(t, "flood")
+		runner.MaxOut = 100
+
+		result, err := runner.Run(context.Background(), "diff")
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if len(result.Stdout) != 100 {
+			t.Errorf("len(stdout) = %d, want 100", len(result.Stdout))
+		}
+		if !result.Truncated {
+			t.Error("Truncated = false, want true")
+		}
+	})
+
+	t.Run("stderr", func(t *testing.T) {
+		runner := helperRunner(t, "flooderr")
+		runner.MaxErr = 32
+
+		result, err := runner.Run(context.Background(), "diff")
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if len(result.Stderr) != 32 || len(result.Stdout) != 0 {
+			t.Errorf("stderr = %d bytes, stdout = %d bytes, want 32 and 0", len(result.Stderr), len(result.Stdout))
+		}
+		if !result.Truncated {
+			t.Error("Truncated = false, want true")
+		}
+	})
+
+	t.Run("unbounded", func(t *testing.T) {
+		runner := helperRunner(t, "args")
+
+		result, err := runner.Run(context.Background(), "status")
+		if err != nil {
+			t.Fatalf("Run() error = %v, want nil", err)
+		}
+		if result.Truncated {
+			t.Error("Truncated = true for a small output, want false")
+		}
+	})
+}
+
+func TestExecRunnerTimeoutAndCancellation(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		runner := helperRunner(t, "wait")
+		runner.Timeout = 50 * time.Millisecond
+
+		_, err := runner.Run(context.Background(), "status")
+
+		var runErr *RunError
+		if !errors.As(err, &runErr) {
+			t.Fatalf("Run() error = %v, want *RunError", err)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Run() error = %v, want %v", err, context.DeadlineExceeded)
+		}
+	})
+
+	t.Run("cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		runner := helperRunner(t, "wait")
+		runner.Timeout = time.Minute
+
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			cancel()
+		}()
+
+		_, err := runner.Run(ctx, "status")
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run() error = %v, want %v", err, context.Canceled)
+		}
+	})
+}
+
+func TestExecRunnerRejectsUnsafeArguments(t *testing.T) {
+	root, err := domain.NewRepoPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRepoPath() error = %v, want nil", err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		root domain.RepoPath
+	}{
+		{name: "no subcommand", args: nil, root: root},
+		{name: "leading dash", args: []string{"--exec=rm"}, root: root},
+		{name: "empty subcommand", args: []string{""}, root: root},
+		{name: "nul in argument", args: []string{"status", "a\x00b"}, root: root},
+		{name: "zero root", args: []string{"status"}, root: domain.RepoPath{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := NewExecRunner(tc.root)
+			runner.Git = os.Args[0]
+
+			_, err := runner.Run(context.Background(), tc.args...)
+			if tc.root.IsZero() {
+				if !errors.Is(err, domain.ErrInvalidPath) {
+					t.Fatalf("Run() error = %v, want %v", err, domain.ErrInvalidPath)
+				}
+
+				return
+			}
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("Run() error = %v, want %v", err, domain.ErrInvalidArgument)
+			}
+
+			var runErr *RunError
+			if errors.As(err, &runErr) {
+				t.Errorf("Run() error = %v, want a validation error, not a *RunError", err)
+			}
+		})
+	}
+}
+
+func TestRunErrorUnwrapsItsCause(t *testing.T) {
+	cause := errors.New("causa")
+	runErr := &RunError{Args: []string{"log"}, Code: 1, Stderr: "algo\n", Err: cause}
+
+	if !errors.Is(runErr, cause) {
+		t.Error("Unwrap() does not expose the cause")
+	}
+
+	message := runErr.Error()
+	for _, want := range []string{"git log", "salida 1", "algo", "causa"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("Error() = %q, want it to contain %q", message, want)
+		}
+	}
+
+	empty := (&RunError{Args: []string{"status"}}).Error()
+	if empty != "git status" {
+		t.Errorf("Error() = %q, want %q", empty, "git status")
+	}
+}
+
+func TestRunErrorSnippetsLongStderr(t *testing.T) {
+	runErr := &RunError{Args: []string{"log"}, Code: 128, Stderr: strings.Repeat("e", errorSnippet+50)}
+
+	if got := len(runErr.Error()); got > errorSnippet+40 {
+		t.Errorf("len(Error()) = %d, want a bounded message", got)
+	}
+	if !strings.HasSuffix(runErr.Error(), "…") {
+		t.Errorf("Error() = %q, want the truncation marker", runErr.Error())
+	}
+}
+
+func countEntries(env []string, entry string) int {
+	count := 0
+	for _, value := range env {
+		if value == entry {
+			count++
+		}
+	}
+
+	return count
+}

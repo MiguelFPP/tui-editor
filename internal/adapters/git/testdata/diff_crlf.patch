@@ -1,0 +1,8 @@
+diff --git crlf.txt crlf.txt
+index 0aa0f34..1525a06 100644
+--- crlf.txt
++++ crlf.txt
+@@ -1,2 +1,2 @@
+ x
+-y
++z

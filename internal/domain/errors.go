@@ -13,6 +13,7 @@ var (
 	ErrPermissionDenied  = errors.New("permiso denegado")
 	ErrNotRepository     = errors.New("no es un repositorio git")
 	ErrGitIndexLocked    = errors.New("el índice de git está bloqueado")
+	ErrGitUnavailable    = errors.New("git no está disponible")
 	ErrNoRemote          = errors.New("no hay remoto configurado")
 	ErrDockerUnavailable = errors.New("docker no está disponible")
 )

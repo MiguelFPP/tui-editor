@@ -83,6 +83,7 @@ type GitStatus struct {
 	Ahead     int
 	Behind    int
 	Detached  bool
+	Unborn    bool
 	Files     []GitFileStatus
 	Truncated bool
 }
@@ -119,6 +120,7 @@ type Branch struct {
 	Name     string
 	Upstream string
 	Current  bool
+	Gone     bool
 	Ahead    int
 	Behind   int
 }
@@ -176,4 +178,83 @@ type MergeResult struct {
 
 func (r MergeResult) HasConflicts() bool {
 	return len(r.Conflicts) > 0
+}
+
+// Commit is one entry of a bounded history page.
+type Commit struct {
+	Hash      string
+	ShortHash string
+	Author    string
+	Email     string
+	Subject   string
+	Date      time.Time
+}
+
+// CommitQuery selects one page of history, optionally limited to one path.
+type CommitQuery struct {
+	Ref   string
+	Path  RelPath
+	Limit int
+	Skip  int
+}
+
+// Normalized clamps the page size to the domain limits.
+func (q CommitQuery) Normalized() CommitQuery {
+	switch {
+	case q.Limit <= 0:
+		q.Limit = DefaultCommits
+	case q.Limit > MaxCommits:
+		q.Limit = MaxCommits
+	}
+
+	if q.Skip < 0 {
+		q.Skip = 0
+	}
+
+	return q
+}
+
+// CommitPage is one page of history; Truncated reports commits left out.
+type CommitPage struct {
+	Commits   []Commit
+	Truncated bool
+}
+
+// CommitDetail is one commit with its message body and its per-file diffs.
+type CommitDetail struct {
+	Commit    Commit
+	Body      string
+	Files     []Diff
+	Truncated bool
+}
+
+// Totals sums the line changes of every file in the commit.
+func (d CommitDetail) Totals() (additions, deletions int) {
+	for _, file := range d.Files {
+		additions += file.Additions
+		deletions += file.Deletions
+	}
+
+	return additions, deletions
+}
+
+// FileStat is the numstat entry of one path.
+type FileStat struct {
+	Path      RelPath
+	OrigPath  RelPath
+	Binary    bool
+	Additions int
+	Deletions int
+}
+
+// DiffStat is the bounded numstat summary of the worktree or of the index.
+type DiffStat struct {
+	Files     []FileStat
+	Additions int
+	Deletions int
+	Truncated bool
+}
+
+func (s DiffStat) IsEmpty() bool {
+	return len(s.Files) == 0
 }

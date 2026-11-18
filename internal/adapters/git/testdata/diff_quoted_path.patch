@@ -1,0 +1,7 @@
+diff --git "ta\tb.txt" "ta\tb.txt"
+index 6604779..bf1097d 100644
+--- "ta\tb.txt"
++++ "ta\tb.txt"
+@@ -1 +1 @@
+-tabulado
++tabulado cambiado

@@ -10,4 +10,9 @@ const (
 	MaxDiffLines     = 20000
 	MaxLogLines      = 1000
 	DefaultLogTail   = 100
+	MaxCommits       = 200
+	DefaultCommits   = 50
+	MaxBranches      = 500
+	MaxStashes       = 100
+	MaxDiffFiles     = 500
 )

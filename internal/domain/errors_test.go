@@ -18,6 +18,7 @@ func TestSentinelsAreUsableAndWellFormed(t *testing.T) {
 		"ErrPermissionDenied":  ErrPermissionDenied,
 		"ErrNotRepository":     ErrNotRepository,
 		"ErrGitIndexLocked":    ErrGitIndexLocked,
+		"ErrGitUnavailable":    ErrGitUnavailable,
 		"ErrNoRemote":          ErrNoRemote,
 		"ErrDockerUnavailable": ErrDockerUnavailable,
 	}

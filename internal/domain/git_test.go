@@ -164,3 +164,79 @@ func TestMergeResultHasConflicts(t *testing.T) {
 		t.Error("conflicted merge does not report conflicts")
 	}
 }
+
+func TestCommitQueryNormalized(t *testing.T) {
+	cases := []struct {
+		name      string
+		query     CommitQuery
+		limit     int
+		skip      int
+		unchanged bool
+	}{
+		{name: "zero limit", query: CommitQuery{}, limit: DefaultCommits},
+		{name: "negative limit", query: CommitQuery{Limit: -3}, limit: DefaultCommits},
+		{name: "small limit", query: CommitQuery{Limit: 10}, limit: 10, unchanged: true},
+		{name: "at max", query: CommitQuery{Limit: MaxCommits}, limit: MaxCommits, unchanged: true},
+		{name: "above max", query: CommitQuery{Limit: MaxCommits + 1}, limit: MaxCommits},
+		{name: "negative skip", query: CommitQuery{Limit: 5, Skip: -1}, limit: 5, skip: 0},
+		{name: "positive skip", query: CommitQuery{Limit: 5, Skip: 40}, limit: 5, skip: 40, unchanged: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.query.Normalized()
+			if got.Limit != tc.limit {
+				t.Errorf("Limit = %d, want %d", got.Limit, tc.limit)
+			}
+			if got.Skip != tc.skip {
+				t.Errorf("Skip = %d, want %d", got.Skip, tc.skip)
+			}
+			if same := got == tc.query; same != tc.unchanged {
+				t.Errorf("query changed = %v, want %v", same, tc.unchanged)
+			}
+		})
+	}
+
+	// Ref and Path are opaque to the query and survive normalisation.
+	query := CommitQuery{Ref: "main", Path: "dir/file.txt", Limit: MaxCommits + 1, Skip: -2}.Normalized()
+	if query.Ref != "main" || query.Path != "dir/file.txt" {
+		t.Errorf("Normalized() = %+v, want the ref and path preserved", query)
+	}
+}
+
+func TestCommitDetailTotals(t *testing.T) {
+	detail := CommitDetail{Files: []Diff{
+		{Path: "a.go", Additions: 3, Deletions: 1},
+		{Path: "b.go", Additions: 0, Deletions: 4},
+		{Path: "logo.png", Binary: true},
+	}}
+
+	additions, deletions := detail.Totals()
+	if additions != 3 {
+		t.Errorf("additions = %d, want 3", additions)
+	}
+	if deletions != 5 {
+		t.Errorf("deletions = %d, want 5", deletions)
+	}
+
+	if additions, deletions := (CommitDetail{}).Totals(); additions != 0 || deletions != 0 {
+		t.Errorf("empty Totals() = %d/%d, want 0/0", additions, deletions)
+	}
+}
+
+func TestDiffStatIsEmpty(t *testing.T) {
+	if !(DiffStat{}).IsEmpty() {
+		t.Error("DiffStat{}.IsEmpty() = false, want true")
+	}
+	if (DiffStat{Files: []FileStat{{Path: "a.go", Additions: 1}}}).IsEmpty() {
+		t.Error("DiffStat with a file: IsEmpty() = true, want false")
+	}
+
+	stat := DiffStat{Files: []FileStat{{Path: "logo.png", Binary: true, OrigPath: "old.png"}}, Additions: 0, Deletions: 0}
+	if stat.IsEmpty() {
+		t.Error("DiffStat with one binary rename: IsEmpty() = true, want false")
+	}
+	if !stat.Files[0].Binary || stat.Files[0].OrigPath != "old.png" {
+		t.Errorf("FileStat = %+v, want the binary rename preserved", stat.Files[0])
+	}
+}

@@ -24,12 +24,24 @@ func (readerOnly) Diff(context.Context, domain.DiffRequest) (domain.Diff, error)
 	return domain.Diff{}, nil
 }
 
+func (readerOnly) DiffStat(context.Context, bool) (domain.DiffStat, error) {
+	return domain.DiffStat{}, nil
+}
+
 func (readerOnly) Branches(context.Context) ([]domain.Branch, error) {
 	return nil, nil
 }
 
 func (readerOnly) Stashes(context.Context) ([]domain.StashEntry, error) {
 	return nil, nil
+}
+
+func (readerOnly) Commits(context.Context, domain.CommitQuery) (domain.CommitPage, error) {
+	return domain.CommitPage{}, nil
+}
+
+func (readerOnly) Show(context.Context, string) (domain.CommitDetail, error) {
+	return domain.CommitDetail{}, nil
 }
 
 func TestGitServiceRequiresBothHalves(t *testing.T) {

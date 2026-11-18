@@ -168,6 +168,21 @@ func TestGitServiceHooksErrorsAndZeroValues(t *testing.T) {
 		t.Errorf("Stashes() = %v, %v, want none and nil", stashes, err)
 	}
 
+	stat, err := svc.DiffStat(context.Background(), true)
+	if err != nil || !stat.IsEmpty() {
+		t.Errorf("DiffStat() = %+v, %v, want an empty stat and nil", stat, err)
+	}
+
+	page, err := svc.Commits(context.Background(), domain.CommitQuery{Ref: "main"})
+	if err != nil || len(page.Commits) != 0 {
+		t.Errorf("Commits() = %+v, %v, want no commits and nil", page, err)
+	}
+
+	detail, err := svc.Show(context.Background(), "abc123")
+	if err != nil || len(detail.Files) != 0 {
+		t.Errorf("Show() = %+v, %v, want an empty detail and nil", detail, err)
+	}
+
 	if err := svc.Stage(context.Background(), []domain.RelPath{"main.go"}); err != nil {
 		t.Errorf("Stage() error = %v, want nil", err)
 	}
@@ -202,6 +217,142 @@ func TestGitServiceHooksErrorsAndZeroValues(t *testing.T) {
 	calls := svc.Calls()
 	if got, want := calls[len(calls)-1].Args[0], "mensaje"; got != want {
 		t.Errorf("Commit arg = %#v, want %#v", got, want)
+	}
+}
+
+func TestGitServiceReaderHooksReturnHookValues(t *testing.T) {
+	svc := fakes.NewGitService()
+	svc.OnDiffStat = func(_ context.Context, staged bool) (domain.DiffStat, error) {
+		stat := domain.DiffStat{Files: []domain.FileStat{{Path: "main.go", Additions: 2}}, Additions: 2}
+		if staged {
+			stat.Files[0].Path = "staged.go"
+		}
+
+		return stat, nil
+	}
+	svc.OnCommits = func(_ context.Context, query domain.CommitQuery) (domain.CommitPage, error) {
+		return domain.CommitPage{Commits: []domain.Commit{{Hash: query.Ref}}, Truncated: true}, nil
+	}
+	svc.OnShow = func(_ context.Context, hash string) (domain.CommitDetail, error) {
+		return domain.CommitDetail{Commit: domain.Commit{Hash: hash}, Body: "cuerpo"}, nil
+	}
+
+	stat, err := svc.DiffStat(context.Background(), true)
+	if err != nil {
+		t.Fatalf("DiffStat() error = %v, want nil", err)
+	}
+	if stat.IsEmpty() || stat.Files[0].Path != "staged.go" {
+		t.Errorf("DiffStat(staged) = %+v, want the hook stat", stat)
+	}
+
+	page, err := svc.Commits(context.Background(), domain.CommitQuery{Ref: "main"})
+	if err != nil {
+		t.Fatalf("Commits() error = %v, want nil", err)
+	}
+	if !page.Truncated || len(page.Commits) != 1 || page.Commits[0].Hash != "main" {
+		t.Errorf("Commits() = %+v, want the hook page", page)
+	}
+
+	detail, err := svc.Show(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("Show() error = %v, want nil", err)
+	}
+	if detail.Body != "cuerpo" || detail.Commit.Hash != "abc123" {
+		t.Errorf("Show() = %+v, want the hook detail", detail)
+	}
+
+	calls := svc.Calls()
+	if got, want := len(calls), 3; got != want {
+		t.Fatalf("len(Calls()) = %d, want %d", got, want)
+	}
+	staged, ok := calls[0].Args[0].(bool)
+	if !ok || !staged || len(calls[0].Args) != 1 {
+		t.Errorf("DiffStat args = %#v, want [true]", calls[0].Args)
+	}
+
+	wantQuery := domain.CommitQuery{Ref: "main"}
+	if got := calls[1].Args[0]; got != wantQuery {
+		t.Errorf("Commits arg = %#v, want %#v", got, wantQuery)
+	}
+	if got := calls[2].Args[0]; got != "abc123" {
+		t.Errorf("Show arg = %#v, want %#v", got, "abc123")
+	}
+}
+
+func TestGitServiceReaderSkipsHookWhenContextIsDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc := fakes.NewGitService()
+	called := false
+	mark := func() { called = true }
+	svc.OnStatus = func(context.Context) (domain.GitStatus, error) {
+		mark()
+
+		return domain.GitStatus{Branch: "main"}, nil
+	}
+	svc.OnDiff = func(context.Context, domain.DiffRequest) (domain.Diff, error) {
+		mark()
+
+		return domain.Diff{Path: "main.go"}, nil
+	}
+	svc.OnDiffStat = func(context.Context, bool) (domain.DiffStat, error) {
+		mark()
+
+		return domain.DiffStat{Additions: 1}, nil
+	}
+	svc.OnBranches = func(context.Context) ([]domain.Branch, error) {
+		mark()
+
+		return []domain.Branch{{Name: "main"}}, nil
+	}
+	svc.OnStashes = func(context.Context) ([]domain.StashEntry, error) {
+		mark()
+
+		return []domain.StashEntry{{Index: 1}}, nil
+	}
+	svc.OnCommits = func(context.Context, domain.CommitQuery) (domain.CommitPage, error) {
+		mark()
+
+		return domain.CommitPage{Commits: []domain.Commit{{Hash: "abc"}}}, nil
+	}
+	svc.OnShow = func(context.Context, string) (domain.CommitDetail, error) {
+		mark()
+
+		return domain.CommitDetail{Body: "cuerpo"}, nil
+	}
+
+	readers := []struct {
+		method string
+		call   func() error
+	}{
+		{method: "Status", call: func() error { _, err := svc.Status(ctx); return err }},
+		{method: "Diff", call: func() error { _, err := svc.Diff(ctx, domain.DiffRequest{}); return err }},
+		{method: "DiffStat", call: func() error { _, err := svc.DiffStat(ctx, false); return err }},
+		{method: "Branches", call: func() error { _, err := svc.Branches(ctx); return err }},
+		{method: "Stashes", call: func() error { _, err := svc.Stashes(ctx); return err }},
+		{method: "Commits", call: func() error { _, err := svc.Commits(ctx, domain.CommitQuery{}); return err }},
+		{method: "Show", call: func() error { _, err := svc.Show(ctx, "abc123"); return err }},
+	}
+
+	for _, tc := range readers {
+		t.Run(tc.method, func(t *testing.T) {
+			called = false
+
+			err := tc.call()
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s() error = %v, want %v", tc.method, err, context.Canceled)
+			}
+			if !strings.HasPrefix(err.Error(), tc.method+": ") {
+				t.Errorf("error %q must be prefixed with the method name", err)
+			}
+			if called {
+				t.Errorf("%s() ran its hook with a canceled context", tc.method)
+			}
+			if got, want := svc.CallCount(tc.method), 1; got != want {
+				t.Errorf("CallCount(%s) = %d, want %d: the call is recorded first", tc.method, got, want)
+			}
+		})
 	}
 }
 

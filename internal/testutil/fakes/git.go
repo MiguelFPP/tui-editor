@@ -13,8 +13,11 @@ type GitService struct {
 
 	OnStatus          func(ctx context.Context) (domain.GitStatus, error)
 	OnDiff            func(ctx context.Context, req domain.DiffRequest) (domain.Diff, error)
+	OnDiffStat        func(ctx context.Context, staged bool) (domain.DiffStat, error)
 	OnBranches        func(ctx context.Context) ([]domain.Branch, error)
 	OnStashes         func(ctx context.Context) ([]domain.StashEntry, error)
+	OnCommits         func(ctx context.Context, query domain.CommitQuery) (domain.CommitPage, error)
+	OnShow            func(ctx context.Context, hash string) (domain.CommitDetail, error)
 	OnStage           func(ctx context.Context, paths []domain.RelPath) error
 	OnUnstage         func(ctx context.Context, paths []domain.RelPath) error
 	OnStageHunks      func(ctx context.Context, path domain.RelPath, hunks []domain.DiffHunk) error
@@ -63,6 +66,18 @@ func (g *GitService) Diff(ctx context.Context, req domain.DiffRequest) (domain.D
 	return domain.Diff{}, nil
 }
 
+func (g *GitService) DiffStat(ctx context.Context, staged bool) (domain.DiffStat, error) {
+	g.record("DiffStat", staged)
+	if err := ctx.Err(); err != nil {
+		return domain.DiffStat{}, fmt.Errorf("DiffStat: %w", err)
+	}
+	if fn := hook(&g.recorder, &g.OnDiffStat); fn != nil {
+		return fn(ctx, staged)
+	}
+
+	return domain.DiffStat{}, nil
+}
+
 func (g *GitService) Branches(ctx context.Context) ([]domain.Branch, error) {
 	g.record("Branches")
 	if err := ctx.Err(); err != nil {
@@ -85,6 +100,30 @@ func (g *GitService) Stashes(ctx context.Context) ([]domain.StashEntry, error) {
 	}
 
 	return nil, nil
+}
+
+func (g *GitService) Commits(ctx context.Context, query domain.CommitQuery) (domain.CommitPage, error) {
+	g.record("Commits", query)
+	if err := ctx.Err(); err != nil {
+		return domain.CommitPage{}, fmt.Errorf("Commits: %w", err)
+	}
+	if fn := hook(&g.recorder, &g.OnCommits); fn != nil {
+		return fn(ctx, query)
+	}
+
+	return domain.CommitPage{}, nil
+}
+
+func (g *GitService) Show(ctx context.Context, hash string) (domain.CommitDetail, error) {
+	g.record("Show", hash)
+	if err := ctx.Err(); err != nil {
+		return domain.CommitDetail{}, fmt.Errorf("Show: %w", err)
+	}
+	if fn := hook(&g.recorder, &g.OnShow); fn != nil {
+		return fn(ctx, hash)
+	}
+
+	return domain.CommitDetail{}, nil
 }
 
 func (g *GitService) Stage(ctx context.Context, paths []domain.RelPath) error {

@@ -10,8 +10,11 @@ import (
 type GitReader interface {
 	Status(ctx context.Context) (domain.GitStatus, error)
 	Diff(ctx context.Context, req domain.DiffRequest) (domain.Diff, error)
+	DiffStat(ctx context.Context, staged bool) (domain.DiffStat, error)
 	Branches(ctx context.Context) ([]domain.Branch, error)
 	Stashes(ctx context.Context) ([]domain.StashEntry, error)
+	Commits(ctx context.Context, query domain.CommitQuery) (domain.CommitPage, error)
+	Show(ctx context.Context, hash string) (domain.CommitDetail, error)
 }
 
 // GitWriter mutates the repository; the adapter serialises these calls.
