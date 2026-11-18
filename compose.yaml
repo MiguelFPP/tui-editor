@@ -18,6 +18,28 @@ services:
       - go-build-cache:/root/.cache/go-build
     command: ["air", "-c", ".air.toml"]
 
+  # Opt-in service for the Docker panel: mounting the socket grants root-equivalent
+  # access to the host, so it lives in its own profile and `dev`/`app` never mount it.
+  dev-docker:
+    profiles: ["dev-docker"]
+    build:
+      context: .
+      target: dev
+    image: tui-editor:dev
+    init: true
+    stdin_open: true
+    tty: true
+    working_dir: /src
+    environment:
+      TERM: ${TERM:-xterm-256color}
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - .:/src
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["air", "-c", ".air.toml"]
+
   app:
     profiles: ["prod"]
     build:

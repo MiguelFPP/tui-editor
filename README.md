@@ -13,6 +13,8 @@ Estado actual: **v0.2.0 (Git interactivo y edición rápida)**. La TUI arranca c
 | Lip Gloss | v2.1.1 | `charm.land/lipgloss/v2` |
 | Bubbles | v2.2.1 | `charm.land/bubbles/v2` |
 | Chroma | v2.27.0 | `github.com/alecthomas/chroma/v2` |
+| Moby client | v0.6.3 | `github.com/moby/moby/client` |
+| Moby API | v1.57.0 | `github.com/moby/moby/api` |
 | Air (hot reload) | v1.67.4 | — |
 | Alpine (imagen de runtime) | 3.24.4 | — |
 
@@ -64,6 +66,8 @@ make run      # TUI desde la imagen de producción (requiere TTY)
 ```
 
 El TUI necesita un TTY real: usa `docker compose run` (o los targets de arriba) y no `docker compose up -d`. Sin terminal interactiva no se puede dibujar la interfaz.
+
+Para desarrollar el panel Docker existe `make dev-docker`, que arranca el mismo servicio dev con el perfil `dev-docker`. Ese perfil es el único que monta `/var/run/docker.sock`: acceso al socket equivale a acceso root en el host, así que no se monta en `dev` ni en `app` y el daemon nunca se publica por TCP. Úsalo solo para desarrollar el panel; si trabajas en otra cosa, `make dev` es suficiente.
 
 ## Pestañas y atajos
 
@@ -121,6 +125,7 @@ El panel Git es interactivo: prepara archivos y hunks, crea commits con mensaje 
 | --- | --- |
 | `make help` | Lista los targets disponibles (target por defecto) |
 | `make dev` | Ejecuta el TUI con hot reload |
+| `make dev-docker` | Ejecuta el TUI con hot reload y el socket Docker montado (perfil `dev-docker`) |
 | `make run` | Ejecuta el TUI desde la imagen de producción |
 | `make build` | Construye las imágenes Docker (dev y runtime) |
 | `make fmt` | Ejecuta `go fmt ./...` |
@@ -164,7 +169,7 @@ docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version
 
 - Edición rápida: `e` edita el archivo abierto, `ctrl+s` guarda con detección de cambios externos y `E` abre el binario de `--editor`. Los binarios, los truncados y los diffs no se editan en la TUI.
 - Git interactivo: staging por archivo/hunk, commit, ramas, stash, merge, conflictos y sync.
-- Sin panel Docker: llega en una fase posterior y no se monta el socket por defecto.
+- Adaptador Docker: cliente Moby modular, listado, stats de una muestra, logs paginados sin `follow` y eventos con debounce. La UI del panel llega en una fase posterior.
 - Previews y listados acotados por tamaño y número de líneas; los binarios se detectan y no se renderizan.
 - El staging por hunk cubre archivos modificados; los binarios, untracked y renames se preparan por archivo.
 

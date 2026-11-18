@@ -3,13 +3,16 @@ COMPOSE_RUN = $(COMPOSE) run --rm --no-deps -T
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev run build test test-pkg test-run test-integration test-race vet vet-pkg bench-pkg fmt tidy clean
+.PHONY: help dev dev-docker run build test test-pkg test-run test-integration test-race vet vet-pkg bench-pkg fmt tidy clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 dev: ## Run the TUI with hot reload (needs a TTY)
 	$(COMPOSE) run --rm dev
+
+dev-docker: ## Run the TUI with hot reload and the Docker socket mounted (needs a TTY)
+	$(COMPOSE) --profile dev-docker run --rm dev-docker
 
 run: ## Run the TUI from the production image (needs a TTY)
 	$(COMPOSE) --profile prod run --rm app
