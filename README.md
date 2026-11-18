@@ -2,7 +2,7 @@
 
 TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploración y edición rápida de archivos, control completo de Git y monitorización de contenedores Docker.
 
-Estado actual: **v0.2.0 (Git interactivo y edición rápida)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview, edita y guarda archivos, lanza el editor externo y añade un panel Git completo: staging por archivo/hunk, commit, ramas, stash, merge y sincronización. El panel Docker llega en una fase posterior.
+Estado actual: **v0.2.0 (Git interactivo, edición rápida y panel Docker)**. La TUI arranca con pantalla alternativa y ratón, une el árbol de archivos con el preview, edita y guarda archivos, lanza el editor externo, añade un panel Git completo (staging por archivo/hunk, commit, ramas, stash, merge y sincronización) y un panel Docker de solo lectura más acciones con confirmación.
 
 ## Stack
 
@@ -28,7 +28,7 @@ Las dependencias usan los paths canónicos v2 (`charm.land/...`), no los antiguo
 tui-editor/
 ├── cmd/tui-editor/        # composition root
 ├── internal/
-│   ├── adapters/          # fs, git y editor externo (docker en F12)
+│   ├── adapters/          # fs, git, editor externo y docker
 │   ├── config/            # flags y validación
 │   ├── domain/            # tipos, límites y errores puros
 │   ├── ports/             # interfaces de servicios
@@ -36,7 +36,7 @@ tui-editor/
 │   └── tui/
 │       ├── app/           # modelo raíz, pestañas, layout y ratón
 │       ├── common/        # piezas compartidas (diff)
-│       └── components/    # filetree, editor y gitpanel
+│       └── components/    # filetree, editor, gitpanel y dockerpanel
 ├── .air.toml
 ├── .dockerignore
 ├── .gitignore
@@ -73,7 +73,7 @@ Para desarrollar el panel Docker existe `make dev-docker`, que arranca el mismo 
 
 | Atajo | Acción |
 | --- | --- |
-| `1` / `2` | Cambiar de pestaña (`Files`, `Git`) |
+| `1` / `2` / `3` | Cambiar de pestaña (`Files`, `Git`, `Docker`) |
 | `tab` / `shift+tab` | Alternar el foco en `Files`; cambiar de sección en `Git` |
 | `?` | Mostrar u ocultar la ayuda |
 | `esc` | Cerrar la ayuda o reenviar la tecla al panel |
@@ -118,6 +118,25 @@ El editor externo se resuelve con `exec.LookPath` y se lanza sin shell, con la r
 | `esc` | Cerrar el modal/ayuda o volver a `Cambios` |
 
 El panel Git es interactivo: prepara archivos y hunks, crea commits con mensaje multilínea, gestiona ramas y stash, detecta conflictos y sincroniza con el upstream. Las operaciones de escritura se serializan y nunca fuerzan push ni borran ramas sin confirmación.
+
+### Docker
+
+| Atajo | Acción |
+| --- | --- |
+| `↑`/`↓`, `j`/`k` | Mover el cursor por la tabla |
+| `pgup`/`pgdown`, `home`/`end` | Moverse por páginas o al principio y al final |
+| `enter` | Leer una muestra de `stats` del contenedor seleccionado |
+| `l` | Abrir los `logs` paginados del contenedor seleccionado |
+| `s` / `x` / `R` | `start`, `stop` y `restart` del contenedor seleccionado |
+| `y`/`enter`, `n`/`esc` | Confirmar o cancelar la acción pendiente |
+| `r` | Refrescar la lista (`dev` sin socket reintenta la conexión) |
+| `esc` | Cerrar los `logs` o la confirmación |
+
+La tabla muestra nombre, imagen, estado, health y puertos. `start`, `stop` y `restart` nunca se ejecutan sin confirmación y se cancelan con `n`/`esc`. Los `logs` usan `Tail=100` y `Follow=false`: nunca hay streaming continuo; `k`/`pgup` en la parte superior carga la página anterior con el cursor `Before`/`NextBefore` del adaptador.
+
+Límites y métricas objetivo (F13): el ticker solo existe con la pestaña Docker visible (no hay polling en segundo plano), `stats` es una muestra puntual con timeout, los `logs` están acotados por página y por buffer, y un `tick` de una pestaña oculta no llama al daemon ni reserva memoria. Objetivo de consumo: CPU inactiva ≈ 0 % y RAM < 30 MB.
+
+Si el daemon no está disponible (socket ausente, permiso denegado) el panel muestra un mensaje accionable y `r` reintenta sin tumbar la TUI. Para probarlo hace falta `make dev-docker`; en `dev` y `app` el socket no está montado, así que el panel aparece como “no disponible”.
 
 ## Comandos
 
@@ -169,7 +188,7 @@ docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version
 
 - Edición rápida: `e` edita el archivo abierto, `ctrl+s` guarda con detección de cambios externos y `E` abre el binario de `--editor`. Los binarios, los truncados y los diffs no se editan en la TUI.
 - Git interactivo: staging por archivo/hunk, commit, ramas, stash, merge, conflictos y sync.
-- Adaptador Docker: cliente Moby modular, listado, stats de una muestra, logs paginados sin `follow` y eventos con debounce. La UI del panel llega en una fase posterior.
+- Panel Docker: lista de contenedores, stats de una muestra bajo demanda, logs paginados sin `follow` y acciones `start`/`stop`/`restart` con confirmación. El ticker solo corre con la pestaña visible; el adaptador de eventos con debounce sigue disponible para fases posteriores.
 - Previews y listados acotados por tamaño y número de líneas; los binarios se detectan y no se renderizan.
 - El staging por hunk cubre archivos modificados; los binarios, untracked y renames se preparan por archivo.
 

@@ -65,7 +65,16 @@ func testDeps(t *testing.T) Deps {
 		return domain.EditorCommand{Binary: "vim", Args: []string{target.Path.String()}}, nil
 	}
 
-	return Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git, Editor: editors}
+	docker := fakes.NewDockerService()
+	docker.OnContainers = func(context.Context) ([]domain.ContainerSummary, error) {
+		return []domain.ContainerSummary{
+			{ID: "aaaaaaaaaaaaaaaa", Name: "web", Image: "nginx:latest", State: domain.ContainerRunning},
+		}, nil
+	}
+
+	deps := Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git, Editor: editors, Docker: docker}
+
+	return deps
 }
 
 func newSized(t *testing.T, deps Deps, width, height int) Model {

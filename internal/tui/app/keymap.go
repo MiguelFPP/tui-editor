@@ -8,7 +8,7 @@ type binding struct {
 
 // bindings are the root-level shortcuts; panels add their own documentation.
 var bindings = []binding{
-	{keys: "1 / 2", desc: "cambiar de pestaña (Files, Git)"},
+	{keys: "1 / 2 / 3", desc: "cambiar de pestaña (Files, Git, Docker)"},
 	{keys: "tab", desc: "alternar el foco entre el árbol y el editor"},
 	{keys: "shift+tab", desc: "alternar el foco en sentido inverso"},
 	{keys: "esc", desc: "cerrar la ayuda o reenviarla al panel"},
@@ -29,6 +29,7 @@ func helpLines() []string {
 	lines = append(lines, "")
 	lines = append(lines, "files: e edita el archivo, ctrl+s guarda y E abre el editor externo")
 	lines = append(lines, "git: 2 abre la pestaña; dentro, ? documenta cada sección y sus modales")
+	lines = append(lines, "docker: 3 abre la pestaña; l logs, s/x/R start/stop/restart con confirmación")
 
 	return lines
 }

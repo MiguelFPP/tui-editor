@@ -7,11 +7,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MiguelFPP/tui-editor/internal/adapters/docker"
 	"github.com/MiguelFPP/tui-editor/internal/adapters/editor"
 	"github.com/MiguelFPP/tui-editor/internal/adapters/fs"
 	"github.com/MiguelFPP/tui-editor/internal/adapters/git"
 	"github.com/MiguelFPP/tui-editor/internal/config"
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/app"
 )
 
@@ -61,7 +63,15 @@ func run() error {
 		return fmt.Errorf("construir el servicio de editor: %w", err)
 	}
 
-	program := tea.NewProgram(app.New(app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc}))
+	// An unavailable daemon is not fatal: the Docker panel shows an actionable state instead.
+	var dockerSvc ports.DockerService
+	if service, err := docker.New(cfg.DockerHost); err == nil {
+		dockerSvc = service
+	}
+
+	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc}
+
+	program := tea.NewProgram(app.New(deps))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("ejecutar la TUI: %w", err)
 	}

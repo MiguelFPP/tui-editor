@@ -12,6 +12,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/config"
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/components/dockerpanel"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/editor"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
@@ -43,14 +44,18 @@ type Tab uint8
 const (
 	FilesTab Tab = iota
 	GitTab
+	DockerTab
 )
 
 func (t Tab) String() string {
-	if t == GitTab {
+	switch t {
+	case GitTab:
 		return "Git"
+	case DockerTab:
+		return "Docker"
+	default:
+		return "Files"
 	}
-
-	return "Files"
 }
 
 // Focus is the panel that receives the keyboard of the active tab.
@@ -60,6 +65,7 @@ const (
 	FocusTree Focus = iota
 	FocusEditor
 	FocusGit
+	FocusDocker
 )
 
 // Deps are the collaborators injected by the composition root.
@@ -68,6 +74,7 @@ type Deps struct {
 	Files  ports.FileService
 	Git    ports.GitService
 	Editor ports.EditorService
+	Docker ports.DockerService
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -80,6 +87,7 @@ type Model struct {
 	editor    editor.Model
 	hasEditor bool
 	git       gitpanel.Model
+	docker    dockerpanel.Model
 
 	tab   Tab
 	focus Focus
@@ -90,6 +98,7 @@ type Model struct {
 	treeRect   image.Rectangle
 	editorRect image.Rectangle
 	gitRect    image.Rectangle
+	dockerRect image.Rectangle
 
 	help bool
 
@@ -114,6 +123,7 @@ func New(deps Deps) Model {
 		editors:  deps.Editor,
 		tree:     filetree.New(deps.Files, ""),
 		git:      gitpanel.New(deps.Git),
+		docker:   dockerpanel.New(deps.Docker),
 		tab:      FilesTab,
 		focus:    FocusTree,
 		width:    defaultWidth,
@@ -206,7 +216,7 @@ func (m Model) HelpVisible() bool {
 
 // fanOut delivers an async message to every child; each one ignores what it does not own.
 func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 3)
+	cmds := make([]tea.Cmd, 0, 4)
 
 	var cmd tea.Cmd
 	m.tree, cmd = m.tree.Update(msg)
@@ -218,6 +228,9 @@ func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
 	}
 
 	m.git, cmd = m.git.Update(msg)
+	cmds = append(cmds, cmd)
+
+	m.docker, cmd = m.docker.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return tea.Batch(cmds...)
@@ -267,6 +280,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.forwardKey(msg), false
 	}
 
+	// A confirmation or the logs of the Docker panel own every key but the quit shortcut.
+	if m.tab == DockerTab && m.docker.CapturesInput() {
+		if key == "ctrl+c" {
+			return m.quit()
+		}
+
+		return m.forwardKey(msg), false
+	}
+
 	switch key {
 	case "q", "ctrl+c":
 		return m.quit()
@@ -275,13 +297,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 		return nil, false
 	case "1":
-		m.setTab(FilesTab)
-
-		return nil, false
+		return m.setTab(FilesTab), false
 	case "2":
-		m.setTab(GitTab)
-
-		return nil, false
+		return m.setTab(GitTab), false
+	case "3":
+		return m.setTab(DockerTab), false
 	case "tab":
 		if m.tab == FilesTab {
 			m.toggleFocus()
@@ -316,9 +336,14 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.editor = next
 
 		return cmd
-	default:
+	case FocusGit:
 		next, cmd := m.git.Update(msg)
 		m.git = next
+
+		return cmd
+	default:
+		next, cmd := m.docker.Update(msg)
+		m.docker = next
 
 		return cmd
 	}
@@ -358,8 +383,11 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 func (m Model) panelAt(x, y int) (Focus, bool) {
 	point := image.Pt(x, y)
 
-	if m.tab == GitTab {
+	switch m.tab {
+	case GitTab:
 		return FocusGit, point.In(m.gitRect)
+	case DockerTab:
+		return FocusDocker, point.In(m.dockerRect)
 	}
 
 	switch {
@@ -388,24 +416,43 @@ func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 		m.editor = next
 
 		return cmd
-	default:
+	case FocusGit:
 		next, cmd := m.git.Update(msg)
 		m.git = next
+
+		return cmd
+	default:
+		next, cmd := m.docker.Update(msg)
+		m.docker = next
 
 		return cmd
 	}
 }
 
-// setTab switches the active tab and hands the focus to its main panel.
-func (m *Model) setTab(tab Tab) {
-	m.tab = tab
-	if tab == GitTab {
-		m.focus = FocusGit
-
-		return
+// setTab switches the active tab and hands the focus to its main panel; leaving the Docker tab
+// stops its ticker.
+func (m *Model) setTab(tab Tab) tea.Cmd {
+	if tab == m.tab {
+		return nil
 	}
 
-	m.focus = FocusTree
+	var cmd tea.Cmd
+	if m.tab == DockerTab {
+		m.docker.SetActive(false)
+	}
+
+	m.tab = tab
+	switch tab {
+	case GitTab:
+		m.focus = FocusGit
+	case DockerTab:
+		m.focus = FocusDocker
+		cmd = m.docker.SetActive(true)
+	default:
+		m.focus = FocusTree
+	}
+
+	return cmd
 }
 
 // toggleFocus alternates between the tree and the editor inside the Files tab.
@@ -486,13 +533,16 @@ func (m Model) currentError() error {
 			return err
 		}
 	}
+	if err := m.git.Err(); err != nil {
+		return err
+	}
 
-	return m.git.Err()
+	return m.docker.Err()
 }
 
 // loading reports whether any panel is still reading.
 func (m Model) loading() bool {
-	if m.tree.Loading() || m.git.Loading() {
+	if m.tree.Loading() || m.git.Loading() || m.docker.Loading() {
 		return true
 	}
 
@@ -524,6 +574,8 @@ func (m Model) focusLabel() string {
 		return "editor"
 	case FocusGit:
 		return "git"
+	case FocusDocker:
+		return "docker"
 	default:
 		return "árbol"
 	}

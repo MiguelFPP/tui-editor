@@ -46,10 +46,12 @@ func (m *Model) resize() {
 		m.editor.SetSize(editorW, body)
 	}
 	m.git.SetBounds(0, headerRows, width, body)
+	m.docker.SetBounds(0, headerRows, width, body)
 
 	m.treeRect = image.Rect(0, headerRows, treeW, headerRows+body)
 	m.editorRect = image.Rect(treeW, headerRows, width, headerRows+body)
 	m.gitRect = image.Rect(0, headerRows, width, headerRows+body)
+	m.dockerRect = image.Rect(0, headerRows, width, headerRows+body)
 }
 
 func (m Model) canvas() (int, int) {
@@ -88,8 +90,12 @@ func (m Model) render() string {
 // body renders the panels of the active tab, always exactly bodyHeight rows high.
 func (m Model) body(width, height int) []string {
 	rows := bodyHeight(height)
-	if m.tab == GitTab {
+
+	switch m.tab {
+	case GitTab:
 		return fitBox(m.git.View(), width, rows)
+	case DockerTab:
+		return fitBox(m.docker.View(), width, rows)
 	}
 
 	treeW := splitWidth(width)
@@ -117,14 +123,22 @@ func (m Model) editorBox(width, height int) string {
 }
 
 func (m Model) tabsLine(width int) string {
-	files, git := styles.tab.Render(" Files "), styles.tab.Render(" Git ")
-	if m.tab == FilesTab {
+	files := styles.tab.Render(" Files ")
+	git := styles.tab.Render(" Git ")
+	docker := styles.tab.Render(" Docker ")
+
+	switch m.tab {
+	case FilesTab:
 		files = styles.tabOn.Render(" Files ")
-	} else {
+	case GitTab:
 		git = styles.tabOn.Render(" Git ")
+	default:
+		docker = styles.tabOn.Render(" Docker ")
 	}
 
-	return padLine(files+styles.tabSep.Render("│")+git, width)
+	line := files + styles.tabSep.Render("│") + git + styles.tabSep.Render("│") + docker
+
+	return padLine(line, width)
 }
 
 // statusLine shows the repo, the tab, the focus, the hints, the spinner and the toast.
@@ -133,7 +147,7 @@ func (m Model) statusLine(width int) string {
 		"repo: " + m.repoLabel(),
 		"tab: " + m.tab.String(),
 		"foco: " + m.focusLabel(),
-		"1/2 tabs",
+		"1/2/3 tabs",
 		"tab foco",
 		"? ayuda",
 		"q salir",
