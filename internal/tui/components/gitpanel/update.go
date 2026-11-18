@@ -24,9 +24,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.applyDiff(msg)
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		m.handleWheel(msg.Mouse())
 	}
 
 	return m, nil
+}
+
+// handleWheel scrolls the active section without moving its cursor.
+func (m *Model) handleWheel(ev tea.Mouse) {
+	switch ev.Button {
+	case tea.MouseWheelUp:
+		m.offsets[m.section] -= wheelStep
+	case tea.MouseWheelDown:
+		m.offsets[m.section] += wheelStep
+	default:
+		return
+	}
+
+	rows := len(m.rows(m.section))
+	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
 }
 
 // handleKey routes the keyboard of F5: sections, cursor, diff, refresh and help.

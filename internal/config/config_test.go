@@ -219,3 +219,33 @@ func TestParseHelp(t *testing.T) {
 		t.Fatalf("Parse() error = %v, want %v", err, ErrHelp)
 	}
 }
+
+func TestParseVersionSkipsValidation(t *testing.T) {
+	args := []string{
+		"--version",
+		"--repo", filepath.Join(t.TempDir(), "nope"),
+		"--editor", "   ",
+		"--docker-host", "http://127.0.0.1:2375",
+	}
+
+	cfg, err := Parse(args, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if !cfg.ShowVersion {
+		t.Error("ShowVersion = false, want true")
+	}
+	if cfg.Repo != "" || cfg.Editor != "" || cfg.DockerHost != "" {
+		t.Errorf("Parse() = %+v, want an empty config besides ShowVersion", cfg)
+	}
+}
+
+func TestParseVersionDefaultsOff(t *testing.T) {
+	cfg, err := Parse(nil, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.ShowVersion {
+		t.Error("ShowVersion = true, want false")
+	}
+}

@@ -127,6 +127,16 @@ func (m Model) Init() tea.Cmd {
 	return m.load(m.path)
 }
 
+// Loading reports whether the preview is still being read.
+func (m Model) Loading() bool {
+	return m.loading
+}
+
+// Err returns the read error of the open file, if any.
+func (m Model) Err() error {
+	return m.err
+}
+
 // Update applies one message; scrolling and resizing stay off the I/O path.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {

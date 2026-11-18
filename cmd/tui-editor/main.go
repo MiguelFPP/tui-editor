@@ -7,9 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/MiguelFPP/tui-editor/internal/adapters/fs"
+	"github.com/MiguelFPP/tui-editor/internal/adapters/git"
 	"github.com/MiguelFPP/tui-editor/internal/config"
+	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/tui/app"
 )
+
+const version = "0.1.0"
 
 func main() {
 	if err := run(); err != nil {
@@ -29,7 +34,29 @@ func run() error {
 		return err
 	}
 
-	if _, err := tea.NewProgram(app.New(cfg)).Run(); err != nil {
+	if cfg.ShowVersion {
+		fmt.Fprintf(os.Stdout, "tui-editor %s\n", version)
+
+		return nil
+	}
+
+	root, err := domain.NewRepoPath(cfg.Repo)
+	if err != nil {
+		return fmt.Errorf("resolver la raíz del repositorio: %w", err)
+	}
+
+	files, err := fs.New(root)
+	if err != nil {
+		return fmt.Errorf("construir el servicio de archivos: %w", err)
+	}
+
+	gitSvc, err := git.New(root, git.NewExecRunner(root))
+	if err != nil {
+		return fmt.Errorf("construir el servicio de git: %w", err)
+	}
+
+	program := tea.NewProgram(app.New(app.Deps{Config: cfg, Files: files, Git: gitSvc}))
+	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("ejecutar la TUI: %w", err)
 	}
 

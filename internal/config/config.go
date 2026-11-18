@@ -13,18 +13,21 @@ import (
 	"strings"
 )
 
-// Config is the validated runtime configuration of the TUI.
+// Config is the validated runtime configuration of the TUI. ShowVersion is
+// resolved before any other field, so it may leave the rest empty.
 type Config struct {
-	Repo       string
-	Editor     string
-	DockerHost string
-	DebugLog   string
+	ShowVersion bool
+	Repo        string
+	Editor      string
+	DockerHost  string
+	DebugLog    string
 }
 
 // Usage is the help text shown when -h or --help is requested.
 const Usage = `usage: tui-editor [flags]
 
 flags:
+  --version          print the version and exit
   --repo DIR         repository root, default: current directory
   --editor CMD       editor command, default: $EDITOR or vim
   --docker-host URL  Docker daemon endpoint, default: $DOCKER_HOST
@@ -65,6 +68,7 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	flags.SetOutput(io.Discard)
 	flags.Usage = func() {}
 
+	showVersion := flags.Bool("version", false, "muestra la versión y sale")
 	repo := flags.String("repo", workDir, "directorio raíz del repositorio")
 	editor := flags.String("editor", editorDefault(getenv), "comando del editor externo")
 	dockerHost := flags.String("docker-host", strings.TrimSpace(getenv("DOCKER_HOST")), "endpoint del daemon Docker")
@@ -72,6 +76,9 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
+	}
+	if *showVersion {
+		return Config{ShowVersion: true}, nil
 	}
 	if flags.NArg() > 0 {
 		return Config{}, fmt.Errorf("argumento no esperado %q", flags.Arg(0))

@@ -620,3 +620,38 @@ func TestUpdateIgnoresUnrelatedMessages(t *testing.T) {
 		t.Errorf("Visible() = %v, want it unchanged", labels(next.Visible()))
 	}
 }
+
+func TestLoadingReportsPendingReads(t *testing.T) {
+	files := treeFake(t)
+	m := New(files, "")
+
+	if !m.Loading() {
+		t.Error("Loading() = false before Init, want true")
+	}
+	if m.Err() != nil {
+		t.Errorf("Err() = %v, want nil", m.Err())
+	}
+
+	m = drain(t, m, m.Init())
+	if m.Loading() {
+		t.Error("Loading() = true after the listing, want false")
+	}
+	if m.Err() != nil {
+		t.Errorf("Err() = %v, want nil", m.Err())
+	}
+}
+
+func TestLoadingAndErrReportFailures(t *testing.T) {
+	fail := fakes.NewFileService()
+	fail.OnReadDir = func(_ context.Context, _ domain.RelPath) (domain.DirListing, error) {
+		return domain.DirListing{}, fmt.Errorf("%w: no se pudo leer", domain.ErrPermissionDenied)
+	}
+
+	m := loadRoot(t, fail)
+	if m.Loading() {
+		t.Error("Loading() = true after a failure, want false")
+	}
+	if !errors.Is(m.Err(), domain.ErrPermissionDenied) {
+		t.Errorf("Err() = %v, want %v", m.Err(), domain.ErrPermissionDenied)
+	}
+}

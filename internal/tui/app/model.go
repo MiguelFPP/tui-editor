@@ -2,10 +2,19 @@
 package app
 
 import (
+	"image"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/config"
+	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/components/editor"
+	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
+	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
 )
 
 const (
@@ -15,64 +24,453 @@ const (
 	minWidth  = 40
 	minHeight = 10
 
-	editorChrome = 4
-	minEditor    = 3
+	headerRows = 2
+	footerRows = 1
+
+	minTree      = 24
+	treePercent  = 35
+	minEditorBox = 20
+
+	toastTTL = 3 * time.Second
 )
 
-// Model is the root model: it owns the session state and the layout.
+// Tab is one top-level section of the TUI.
+type Tab uint8
+
+const (
+	FilesTab Tab = iota
+	GitTab
+)
+
+func (t Tab) String() string {
+	if t == GitTab {
+		return "Git"
+	}
+
+	return "Files"
+}
+
+// Focus is the panel that receives the keyboard of the active tab.
+type Focus uint8
+
+const (
+	FocusTree Focus = iota
+	FocusEditor
+	FocusGit
+)
+
+// Deps are the collaborators injected by the composition root.
+type Deps struct {
+	Config config.Config
+	Files  ports.FileService
+	Git    ports.GitReader
+}
+
+// Model is the root model: it owns the tabs, the layout, the focus and the toasts.
 type Model struct {
-	cfg    config.Config
+	cfg   config.Config
+	files ports.FileService
+
+	tree      filetree.Model
+	editor    editor.Model
+	hasEditor bool
+	git       gitpanel.Model
+
+	tab   Tab
+	focus Focus
+
 	width  int
 	height int
+
+	treeRect   image.Rectangle
+	editorRect image.Rectangle
+	gitRect    image.Rectangle
+
+	help bool
+
+	spinner  spinner.Model
+	spinning bool
+
+	toast    string
+	toastSeq int
+	lastErr  error
 }
 
-var styles = struct {
-	title  lipgloss.Style
-	editor lipgloss.Style
-	status lipgloss.Style
-}{
-	title:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	editor: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#565f89")),
-	status: lipgloss.NewStyle().Foreground(lipgloss.Color("#9aa5ce")),
+// toastExpiredMsg clears the toast unless a newer one has taken its place.
+type toastExpiredMsg struct {
+	seq int
 }
 
-// New builds the root model for the given configuration.
-func New(cfg config.Config) Model {
-	return Model{cfg: cfg, width: defaultWidth, height: defaultHeight}
+// New builds the root model for the given dependencies.
+func New(deps Deps) Model {
+	m := Model{
+		cfg:      deps.Config,
+		files:    deps.Files,
+		tree:     filetree.New(deps.Files, ""),
+		git:      gitpanel.New(deps.Git),
+		tab:      FilesTab,
+		focus:    FocusTree,
+		width:    defaultWidth,
+		height:   defaultHeight,
+		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.spinner)),
+		spinning: true,
+	}
+	m.resize()
+
+	return m
 }
 
+// Init starts the tree, the Git panel and the spinner.
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(m.tree.Init(), m.git.Init(), m.spinner.Tick)
 }
 
+// Update routes one message: keys and mouse to the focused panel, the rest by fan-out.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmds := make([]tea.Cmd, 0, 4)
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.width, m.height = msg.Width, msg.Height
+		m.resize()
 	case tea.KeyPressMsg:
-		switch msg.String() {
+		cmd, stop := m.handleKey(msg)
+		if stop {
+			return m, cmd
+		}
+
+		cmds = append(cmds, cmd)
+	case tea.MouseClickMsg:
+		cmds = append(cmds, m.handleClick(msg))
+	case tea.MouseWheelMsg:
+		cmds = append(cmds, m.handleWheel(msg))
+	case spinner.TickMsg:
+		var tick tea.Cmd
+		m.spinner, tick = m.spinner.Update(msg)
+		m.spinning = false
+		if m.loading() {
+			m.spinning = true
+			cmds = append(cmds, tick)
+		}
+	case toastExpiredMsg:
+		if msg.seq == m.toastSeq {
+			m.toast = ""
+		}
+	case filetree.FileChosenMsg:
+		cmds = append(cmds, m.openFile(msg.Path))
+	default:
+		cmds = append(cmds, m.fanOut(msg))
+	}
+
+	cmds = append(cmds, m.afterUpdate())
+
+	return m, tea.Batch(cmds...)
+}
+
+// View renders the layout; the alternate screen and the mouse are set here.
+func (m Model) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
+
+	return view
+}
+
+// Tab returns the active tab.
+func (m Model) Tab() Tab {
+	return m.tab
+}
+
+// Focus returns the panel that owns the keyboard.
+func (m Model) Focus() Focus {
+	return m.focus
+}
+
+// HelpVisible reports whether the help overlay is open.
+func (m Model) HelpVisible() bool {
+	return m.help
+}
+
+// fanOut delivers an async message to every child; each one ignores what it does not own.
+func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, 3)
+
+	var cmd tea.Cmd
+	m.tree, cmd = m.tree.Update(msg)
+	cmds = append(cmds, cmd)
+
+	if m.hasEditor {
+		m.editor, cmd = m.editor.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	m.git, cmd = m.git.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return tea.Batch(cmds...)
+}
+
+// openFile replaces the preview with path, focuses it and loads it.
+func (m *Model) openFile(path domain.RelPath) tea.Cmd {
+	m.editor = editor.New(m.files, path)
+	m.hasEditor = true
+	m.tab = FilesTab
+	m.focus = FocusEditor
+	m.resize()
+
+	return m.editor.Init()
+}
+
+// handleKey applies the root keymap; stop means the returned command quits the program.
+func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	key := msg.String()
+
+	if m.help {
+		switch key {
 		case "q", "ctrl+c":
-			return m, tea.Quit
+			return tea.Quit, true
+		case "?", "esc":
+			m.help = false
+		}
+
+		return nil, false
+	}
+
+	switch key {
+	case "q", "ctrl+c":
+		return tea.Quit, true
+	case "?":
+		m.help = true
+
+		return nil, false
+	case "1":
+		m.setTab(FilesTab)
+
+		return nil, false
+	case "2":
+		m.setTab(GitTab)
+
+		return nil, false
+	case "tab":
+		if m.tab == FilesTab {
+			m.toggleFocus()
+
+			return nil, false
+		}
+	case "shift+tab":
+		if m.tab == FilesTab {
+			m.toggleFocus()
+
+			return nil, false
 		}
 	}
 
-	return m, nil
+	return m.forwardKey(msg), false
 }
 
-func (m Model) View() tea.View {
-	width := max(m.width, minWidth)
-	height := max(m.height, minHeight)
-	editorHeight := max(height-editorChrome, minEditor)
+// forwardKey sends a key to the panel that owns the focus.
+func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch m.focus {
+	case FocusTree:
+		next, cmd := m.tree.Update(msg)
+		m.tree = next
 
-	titleText := styles.title.Render(" tui-editor ")
-	editorPane := styles.editor.Width(width - 4).Height(editorHeight).Render("área de edición")
-	statusBar := styles.status.Render("repo: " + m.cfg.Repo + "  •  q: salir  •  ctrl+c: salir")
+		return cmd
+	case FocusEditor:
+		if !m.hasEditor {
+			return nil
+		}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, titleText, editorPane, statusBar)
+		next, cmd := m.editor.Update(msg)
+		m.editor = next
 
-	v := tea.NewView(content)
-	v.AltScreen = true
+		return cmd
+	default:
+		next, cmd := m.git.Update(msg)
+		m.git = next
 
-	return v
+		return cmd
+	}
+}
+
+// handleClick routes a click to the panel under the cursor, if any.
+func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
+	if m.help {
+		return nil
+	}
+
+	panel, ok := m.panelAt(msg.X, msg.Y)
+	if !ok {
+		return nil
+	}
+	m.focus = panel
+
+	return m.dispatchMouse(msg, panel)
+}
+
+// handleWheel sends the wheel to the panel under the cursor, not to the focused one.
+func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	if m.help {
+		return nil
+	}
+
+	panel, ok := m.panelAt(msg.X, msg.Y)
+	if !ok {
+		return nil
+	}
+	m.focus = panel
+
+	return m.dispatchMouse(msg, panel)
+}
+
+// panelAt maps terminal coordinates to the panel that owns them.
+func (m Model) panelAt(x, y int) (Focus, bool) {
+	point := image.Pt(x, y)
+
+	if m.tab == GitTab {
+		return FocusGit, point.In(m.gitRect)
+	}
+
+	switch {
+	case point.In(m.treeRect):
+		return FocusTree, true
+	case point.In(m.editorRect):
+		return FocusEditor, m.hasEditor
+	default:
+		return m.focus, false
+	}
+}
+
+func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
+	switch panel {
+	case FocusTree:
+		next, cmd := m.tree.Update(msg)
+		m.tree = next
+
+		return cmd
+	case FocusEditor:
+		if !m.hasEditor {
+			return nil
+		}
+
+		next, cmd := m.editor.Update(msg)
+		m.editor = next
+
+		return cmd
+	default:
+		next, cmd := m.git.Update(msg)
+		m.git = next
+
+		return cmd
+	}
+}
+
+// setTab switches the active tab and hands the focus to its main panel.
+func (m *Model) setTab(tab Tab) {
+	m.tab = tab
+	if tab == GitTab {
+		m.focus = FocusGit
+
+		return
+	}
+
+	m.focus = FocusTree
+}
+
+// toggleFocus alternates between the tree and the editor inside the Files tab.
+func (m *Model) toggleFocus() {
+	if !m.hasEditor || m.focus == FocusEditor {
+		m.focus = FocusTree
+
+		return
+	}
+
+	m.focus = FocusEditor
+}
+
+// afterUpdate reconciles the toast and keeps exactly one spinner tick in flight.
+func (m *Model) afterUpdate() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, 2)
+
+	if cmd := m.syncToast(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if m.loading() && !m.spinning {
+		m.spinning = true
+		cmds = append(cmds, m.spinner.Tick)
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// syncToast shows a toast when the first error changes, and schedules its expiry.
+func (m *Model) syncToast() tea.Cmd {
+	err := m.currentError()
+	if sameError(err, m.lastErr) {
+		return nil
+	}
+
+	m.lastErr = err
+	if err == nil {
+		return nil
+	}
+
+	m.toast = toastPrefix + err.Error()
+	m.toastSeq++
+	seq := m.toastSeq
+
+	return tea.Tick(toastTTL, func(time.Time) tea.Msg { return toastExpiredMsg{seq: seq} })
+}
+
+// currentError returns the first active error of the panels.
+func (m Model) currentError() error {
+	if err := m.tree.Err(); err != nil {
+		return err
+	}
+	if m.hasEditor {
+		if err := m.editor.Err(); err != nil {
+			return err
+		}
+	}
+
+	return m.git.Err()
+}
+
+// loading reports whether any panel is still reading.
+func (m Model) loading() bool {
+	if m.tree.Loading() || m.git.Loading() {
+		return true
+	}
+
+	return m.hasEditor && m.editor.Loading()
+}
+
+func sameError(a, b error) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return a.Error() == b.Error()
+	}
+}
+
+func (m Model) repoLabel() string {
+	if strings.TrimSpace(m.cfg.Repo) == "" {
+		return "."
+	}
+
+	return m.cfg.Repo
+}
+
+func (m Model) focusLabel() string {
+	switch m.focus {
+	case FocusEditor:
+		return "editor"
+	case FocusGit:
+		return "git"
+	default:
+		return "árbol"
+	}
 }

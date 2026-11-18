@@ -713,3 +713,63 @@ func TestSectionLabels(t *testing.T) {
 		t.Errorf("Section(9).String() = %q, want the first label", got)
 	}
 }
+
+func TestLoadingAndErrReportTheSectionState(t *testing.T) {
+	git := gitFake(t)
+	m := New(git)
+	m.SetSize(72, 14)
+
+	if !m.Loading() {
+		t.Error("Loading() = false before Init, want true")
+	}
+	if m.Err() != nil {
+		t.Errorf("Err() = %v, want nil", m.Err())
+	}
+
+	m = loadAll(t, m, m.Init())
+	if m.Loading() {
+		t.Error("Loading() = true after the loads, want false")
+	}
+	if m.Err() != nil {
+		t.Errorf("Err() = %v, want nil", m.Err())
+	}
+
+	git.OnBranches = func(context.Context) ([]domain.Branch, error) {
+		return nil, domain.ErrNotRepository
+	}
+	m = press(t, m, key('r'))
+
+	if m.Loading() {
+		t.Error("Loading() = true after the refresh, want false")
+	}
+	if !errors.Is(m.Err(), domain.ErrNotRepository) {
+		t.Errorf("Err() = %v, want %v", m.Err(), domain.ErrNotRepository)
+	}
+}
+
+func TestWheelScrollsTheActiveSection(t *testing.T) {
+	m := open(t, gitFake(t))
+	m.SetSize(72, 5)
+
+	if got := m.offsets[Changes]; got != 0 {
+		t.Fatalf("offsets[Changes] = %d, want 0", got)
+	}
+
+	next, cmd := m.Update(tea.MouseWheelMsg{X: 4, Y: 4, Button: tea.MouseWheelDown})
+	if cmd != nil {
+		t.Errorf("the wheel produced a command, want nil")
+	}
+	if next.offsets[Changes] != wheelStep {
+		t.Errorf("offsets[Changes] = %d, want %d", next.offsets[Changes], wheelStep)
+	}
+
+	next, _ = next.Update(tea.MouseWheelMsg{X: 4, Y: 4, Button: tea.MouseWheelUp})
+	if next.offsets[Changes] != 0 {
+		t.Errorf("offsets[Changes] = %d, want 0", next.offsets[Changes])
+	}
+
+	next, _ = next.Update(tea.MouseWheelMsg{X: 4, Y: 4, Button: tea.MouseWheelUp})
+	if next.offsets[Changes] != 0 {
+		t.Errorf("offsets[Changes] = %d, want the scroll clamped at 0", next.offsets[Changes])
+	}
+}

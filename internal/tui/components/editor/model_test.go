@@ -650,3 +650,29 @@ func TestLexerForMatchesPathThenContent(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadingAndErrReportTheReadState(t *testing.T) {
+	pending := New(filesFake(t), "main.go")
+	if !pending.Loading() {
+		t.Error("Loading() = false before Init, want true")
+	}
+	if pending.Err() != nil {
+		t.Errorf("Err() = %v, want nil", pending.Err())
+	}
+
+	m := open(t, "main.go", goldenWidth, goldenHeight)
+	if m.Loading() {
+		t.Error("Loading() = true after the load, want false")
+	}
+	if m.Err() != nil {
+		t.Errorf("Err() = %v, want nil", m.Err())
+	}
+
+	failed := open(t, "logo.png", goldenWidth, goldenHeight)
+	if failed.Loading() {
+		t.Error("Loading() = true after a failure, want false")
+	}
+	if !errors.Is(failed.Err(), domain.ErrBinary) {
+		t.Errorf("Err() = %v, want %v", failed.Err(), domain.ErrBinary)
+	}
+}

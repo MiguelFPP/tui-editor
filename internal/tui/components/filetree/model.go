@@ -185,6 +185,16 @@ func (m Model) Filter() string {
 	return m.filter
 }
 
+// Loading reports whether a listing is still pending.
+func (m Model) Loading() bool {
+	return m.loadingNow()
+}
+
+// Err returns the active listing error, if any.
+func (m Model) Err() error {
+	return m.err
+}
+
 // load asks the port for one listing under a bounded context.
 func (m Model) load(dir domain.RelPath) tea.Cmd {
 	files := m.files

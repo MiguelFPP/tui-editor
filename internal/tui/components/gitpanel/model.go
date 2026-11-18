@@ -26,6 +26,7 @@ const (
 	minRows    = 1
 
 	loadTimeout = 5 * time.Second
+	wheelStep   = 3
 )
 
 // Section is one navigable block of the panel.
@@ -172,6 +173,25 @@ func (m Model) Init() tea.Cmd {
 // Section returns the section currently displayed.
 func (m Model) Section() Section {
 	return m.section
+}
+
+// Loading reports whether any section is still reading.
+func (m Model) Loading() bool {
+	return m.loading.status || m.loading.branches || m.loading.history || m.loading.diff
+}
+
+// Err returns the first active section error, if any.
+func (m Model) Err() error {
+	switch {
+	case m.errs.status != nil:
+		return m.errs.status
+	case m.errs.diff != nil:
+		return m.errs.diff
+	case m.errs.branches != nil:
+		return m.errs.branches
+	default:
+		return m.errs.history
+	}
 }
 
 // SetSize stores the terminal size and re-renders the cached diff.
