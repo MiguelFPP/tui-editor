@@ -54,6 +54,10 @@ func (readerOnly) Show(context.Context, string) (domain.CommitDetail, error) {
 	return domain.CommitDetail{}, nil
 }
 
+func (readerOnly) FileAt(context.Context, domain.FileRev, domain.RelPath) (domain.RevisionContent, error) {
+	return domain.RevisionContent{}, nil
+}
+
 func TestGitServiceRequiresBothHalves(t *testing.T) {
 	var reader any = readerOnly{}
 

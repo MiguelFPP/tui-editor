@@ -181,6 +181,7 @@ func New(deps Deps) Model {
 // gitOptions maps the persisted preference and the save seam onto the panel options.
 func gitOptions(deps Deps) gitpanel.Options {
 	opts := gitpanel.Options{
+		Files:         deps.Files,
 		Layout:        gitpanel.ParseLayout(deps.Config.GitLayout),
 		ListWidth:     deps.Config.GitListWidth,
 		ListCollapsed: deps.Config.GitListCollapsed,

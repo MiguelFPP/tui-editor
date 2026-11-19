@@ -110,6 +110,79 @@ func TestHighlightLinesIsSafeForConcurrentRendering(t *testing.T) {
 	group.Wait()
 }
 
+// TestHighlightFileKeepsTheLineCount checks the whole-file pass keeps every line.
+func TestHighlightFileKeepsTheLineCount(t *testing.T) {
+	lines, ok := HighlightFile("main.go", goHighlightSource)
+	if !ok {
+		t.Fatal("got = false, want true for a Go source")
+	}
+
+	want := strings.Split(strings.TrimSuffix(goHighlightSource, "\n"), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("got = %d lines, want %d", len(lines), len(want))
+	}
+	for index, line := range lines {
+		if got := plainCommon(line); got != want[index] {
+			t.Errorf("line %d = %q, want %q", index, got, want[index])
+		}
+	}
+}
+
+// TestHighlightFileReportsNoLexer falls back to the plain lines without a lexer.
+func TestHighlightFileReportsNoLexer(t *testing.T) {
+	lines, ok := HighlightFile("notes.xyz", unknownHighlightSource)
+	if ok {
+		t.Fatal("got = true, want false without a lexer")
+	}
+
+	want := strings.Split(strings.TrimSuffix(unknownHighlightSource, "\n"), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("got = %d lines, want %d", len(lines), len(want))
+	}
+	for index, line := range lines {
+		if line != want[index] {
+			t.Errorf("line %d = %q, want %q", index, line, want[index])
+		}
+	}
+}
+
+// TestHighlightFileHandlesEmptySource returns one empty row and no lexer.
+func TestHighlightFileHandlesEmptySource(t *testing.T) {
+	lines, ok := HighlightFile("main.go", "")
+	if ok {
+		t.Error("got = true, want false for an empty source")
+	}
+	if len(lines) != 1 || lines[0] != "" {
+		t.Errorf("got = %q, want one empty line", lines)
+	}
+}
+
+// TestHighlightFileColoursAMultiLineString proves the whole file reaches the lexer in one pass.
+func TestHighlightFileColoursAMultiLineString(t *testing.T) {
+	const source = "package main\n\nvar text = `uno\ndos`\n"
+
+	lines, ok := HighlightFile("main.go", source)
+	if !ok {
+		t.Fatal("got = false, want true for a Go source")
+	}
+	if len(lines) != 4 {
+		t.Fatalf("got = %d lines, want 4", len(lines))
+	}
+
+	// The last two rows live inside one raw string literal, so only the whole-file pass colours both.
+	if got, want := plainCommon(lines[2]), "var text = `uno"; got != want {
+		t.Errorf("line 2 = %q, want %q", got, want)
+	}
+	if got, want := plainCommon(lines[3]), "dos`"; got != want {
+		t.Errorf("line 3 = %q, want %q", got, want)
+	}
+	for _, index := range []int{2, 3} {
+		if !strings.Contains(lines[index], "\x1b[") {
+			t.Errorf("line %d = %q, want ANSI escapes inside the literal", index, lines[index])
+		}
+	}
+}
+
 // plainCommon strips the ANSI escapes of one line.
 func plainCommon(line string) string {
 	var out strings.Builder

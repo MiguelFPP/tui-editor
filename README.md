@@ -399,6 +399,12 @@ columna sin perder contenido. Cada columna se dibuja en su propio marco.
   antiguas a la izquierda y las nuevas a la derecha, numeradas por lado y
   coloreadas por columna. Por debajo de ese ancho se mantiene el diff unificado.
 
+El diff partido resalta con el contenido real del archivo: cada lado se resuelve
+según `staged` (índice frente al árbol de trabajo, o `HEAD` frente al índice). La
+lectura se acota a 1 MiB y 2000 líneas por lado; con un archivo binario, truncado
+o ausente en la revisión, el preview muestra "resaltado aproximado" con el motivo.
+Cada lado ocupa como máximo ese límite, así que un archivo no reserva más del doble.
+
 ### Archivo base
 
 ```bash

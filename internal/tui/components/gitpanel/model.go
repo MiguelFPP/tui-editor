@@ -20,6 +20,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
 	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -174,6 +175,17 @@ type diffLoadedMsg struct {
 	err  error
 }
 
+// sidesLoadedMsg carries the real content of both sides of one diff.
+type sidesLoadedMsg struct {
+	seq    int
+	path   domain.RelPath
+	staged bool
+	old    domain.RevisionContent
+	new    domain.RevisionContent
+	oldErr error
+	newErr error
+}
+
 // writeDoneMsg carries the outcome of one write, plus the notice a network write leaves behind.
 type writeDoneMsg struct {
 	seq    int
@@ -186,8 +198,9 @@ var errNoService = errors.New("gitpanel: servicio de git no configurado")
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {
-	git  ports.GitService
-	keys keymap.Registry
+	git   ports.GitService
+	files ports.FileService
+	keys  keymap.Registry
 
 	section Section
 	cursors [sectionCount]int
@@ -208,6 +221,9 @@ type Model struct {
 	diffLines  []string
 	hunkCursor int
 	marked     map[int]bool
+
+	// sides is the real content of both sides of the loaded diff.
+	sides diffSides
 
 	writing  bool
 	writeOp  string
@@ -335,7 +351,28 @@ type seqState struct {
 	stashes  int
 	history  int
 	diff     int
+	sides    int
 	write    int
+}
+
+// sideSource says where one side of the diff is read from.
+type sideSource struct {
+	rev      domain.FileRev
+	worktree bool
+}
+
+// diffSides is the real text of both sides of the loaded diff; ok is false when a side has none.
+type diffSides struct {
+	path    domain.RelPath
+	staged  bool
+	oldPath domain.RelPath
+	newPath domain.RelPath
+	old     string
+	new     string
+	oldOK   bool
+	newOK   bool
+	// reason explains why a side lacks exact content, "" when both sides have it.
+	reason string
 }
 
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
@@ -346,6 +383,8 @@ func New(git ports.GitService, keys keymap.Registry) Model {
 
 // Options configures the panel at construction.
 type Options struct {
+	// Files reads the worktree, so both sides of a diff can be highlighted exactly.
+	Files         ports.FileService
 	Layout        Layout
 	ListWidth     int
 	ListCollapsed bool
@@ -360,6 +399,7 @@ func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Mo
 
 	m := Model{
 		git:           git,
+		files:         opts.Files,
 		keys:          keys,
 		layout:        opts.Layout,
 		listWidth:     max(opts.ListWidth, 0),
@@ -543,10 +583,27 @@ func (m Model) splitDiffWanted() bool {
 // renderPreview draws the diff with the widest layout the preview can hold.
 func (m Model) renderPreview() string {
 	if m.splitDiffWanted() {
-		return common.RenderDiffSplit(m.diff, m.previewWidth(), true)
+		return common.RenderDiffSplitSides(m.diff, m.previewWidth(), true, m.diffSides())
 	}
 
 	return common.RenderDiff(m.diff, m.previewWidth(), true)
+}
+
+// diffSides returns the exact content of both sides when it belongs to the loaded diff.
+func (m Model) diffSides() common.DiffSides {
+	if !m.sides.oldOK && !m.sides.newOK {
+		return common.DiffSides{}
+	}
+	if !m.sidesMatchesDiff() {
+		return common.DiffSides{}
+	}
+
+	return common.DiffSides{Old: m.sides.old, New: m.sides.new}
+}
+
+// sidesMatchesDiff reports whether the loaded sides were read for the current diff.
+func (m Model) sidesMatchesDiff() bool {
+	return m.loaded && m.sides.path == m.diff.Path && m.sides.staged == m.diff.Staged
 }
 
 // previewSpans locates every hunk inside the rendered preview, so the hunk cursor and the clicks
@@ -557,6 +614,25 @@ func (m Model) previewSpans() []rowSpan {
 	}
 
 	return diffSpans(m.diff)
+}
+
+// sidePaths resolves the path of each side; a rename reads its pre-image.
+func sidePaths(d domain.Diff) (domain.RelPath, domain.RelPath) {
+	old := d.OrigPath
+	if old.IsZero() {
+		old = d.Path
+	}
+
+	return old, d.Path
+}
+
+// sideSources picks the revision of each side from the staged mode.
+func sideSources(staged bool) (sideSource, sideSource) {
+	if staged {
+		return sideSource{rev: domain.RevHead}, sideSource{rev: domain.RevIndex}
+	}
+
+	return sideSource{rev: domain.RevIndex}, sideSource{worktree: true}
 }
 
 // alignedSpans is diffSpans for the side-by-side layout: each hunk is its title plus its aligned
@@ -578,10 +654,13 @@ func alignedSpans(diff domain.Diff) []rowSpan {
 	return spans
 }
 
-// highlightKeyFor identifies the cached preview: the path, the mode, the layout and the width decide
-// the lexer and the row count.
+// highlightKeyFor identifies the cached preview; the exact mode enters the key, so a late sides
+// answer invalidates the cache. The sides counter covers the cases where both sides failed.
 func (m Model) highlightKeyFor() string {
-	return fmt.Sprintf("%s|%t|%t|%d", m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth())
+	exact := m.sidesMatchesDiff() && (m.sides.oldOK || m.sides.newOK)
+
+	return fmt.Sprintf("%s|%t|%t|%d|%t|%d",
+		m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth(), exact, m.seqs.sides)
 }
 
 // highlightedPreview colours the body of the diff once per key; a repeated render reuses it. The
@@ -916,7 +995,52 @@ func (m Model) diffRows() []string {
 		body = m.highlighted
 	}
 
-	return append([]string{header}, body...)
+	rows := append([]string{header}, body...)
+	if !m.diff.Binary && m.sidesMatchesDiff() {
+		if note := m.approxNote(); note != "" {
+			rows = append(rows, styles.MetaPlain.Render(truncate(note, m.previewWidth())))
+		}
+	}
+
+	return rows
+}
+
+// approxNote explains the approximate highlight, or "" when both sides are exact.
+func (m Model) approxNote() string {
+	if !m.sidesMatchesDiff() {
+		return ""
+	}
+	if m.sides.oldOK && m.sides.newOK && m.sides.reason == "" {
+		return ""
+	}
+
+	reason := m.sides.reason
+	if reason == "" {
+		reason = "sin contenido"
+	}
+	if m.sides.oldOK != m.sides.newOK {
+		return "resaltado aproximado en un lado · " + reason
+	}
+
+	return "resaltado aproximado · " + reason
+}
+
+// sidesReason explains why a side has no exact content, or "" when both sides do.
+func sidesReason(oldErr, newErr error, old, new domain.RevisionContent) string {
+	switch {
+	case oldErr == nil && newErr == nil && !old.Truncated && !new.Truncated:
+		return ""
+	case errors.Is(oldErr, domain.ErrBinary) || errors.Is(newErr, domain.ErrBinary):
+		return "binario"
+	case errors.Is(oldErr, domain.ErrNotFound) || errors.Is(newErr, domain.ErrNotFound):
+		return "sin contenido"
+	case oldErr != nil || newErr != nil:
+		return "sin contenido"
+	case old.Truncated || new.Truncated:
+		return "truncado"
+	default:
+		return ""
+	}
 }
 
 // hunkLabel describes the hunk cursor and the marks of the loaded diff.
