@@ -35,15 +35,24 @@ const resetStyle = "\x1b[m"
 func (m *Model) resize() {
 	width, height := m.canvas()
 	body := bodyHeight(height)
-	treeW := splitWidth(width)
+	treeW := m.treeWidthNow(width)
 	editorW := max(width-treeW, 0)
 
 	// The frames are chrome: every rectangle is the inner area of its box, one cell inside.
-	treeInner := innerRect(0, headerRows, treeW, body)
+	// A collapsed tree leaves no rectangle at all, so its clicks reach the editor.
+	treeInner := image.Rectangle{}
+	if treeW > 0 {
+		treeInner = innerRect(0, headerRows, treeW, body)
+	}
+	// The hidden tree keeps the geometry of its visible form: its cursor must not be clamped.
+	treeArea := treeInner
+	if treeW == 0 {
+		treeArea = innerRect(0, headerRows, splitWidth(width, m.treeWidth), body)
+	}
 	editorInner := innerRect(treeW, headerRows, editorW, body)
 	panelInner := innerRect(0, headerRows, width, body)
 
-	m.tree.SetBounds(treeInner.Min.X, treeInner.Min.Y, treeInner.Dx(), treeInner.Dy())
+	m.tree.SetBounds(treeArea.Min.X, treeArea.Min.Y, treeArea.Dx(), treeArea.Dy())
 	if m.hasEditor {
 		m.editor.SetSize(editorInner.Dx(), editorInner.Dy())
 	}
@@ -52,7 +61,54 @@ func (m *Model) resize() {
 
 	m.treeRect, m.editorRect = treeInner, editorInner
 	m.gitRect, m.dockerRect = panelInner, panelInner
+	m.splitterRect = m.splitterBounds(treeW, body)
+	m.collapseRect = m.collapseBounds(width)
 	m.markTabs(width)
+}
+
+// splitterBounds is the two shared border cells of the tree and the editor, or an empty rectangle.
+func (m Model) splitterBounds(treeW, body int) image.Rectangle {
+	if !m.canSplit() {
+		return image.Rectangle{}
+	}
+
+	return image.Rect(treeW-1, headerRows, treeW+1, headerRows+body)
+}
+
+// collapseBounds is the right-aligned tree button of the tab row, or empty when it does not fit.
+func (m Model) collapseBounds(width int) image.Rectangle {
+	if m.tab != FilesTab {
+		return image.Rectangle{}
+	}
+
+	size := lipgloss.Width(m.collapseLabel())
+	if start := width - size; start >= m.tabLabelsWidth() {
+		return image.Rect(start, headerRows-1, start+size, headerRows)
+	}
+
+	return image.Rectangle{}
+}
+
+// collapseLabel is the tree button: it points left while the tree is shown and right while hidden.
+func (m Model) collapseLabel() string {
+	if m.treeCollapsed {
+		return "[>]"
+	}
+
+	return "[<]"
+}
+
+// tabLabelsWidth is the rendered width of the tab labels and their separators.
+func (m Model) tabLabelsWidth() int {
+	total := 0
+	for tab := Tab(0); tab < tabCount; tab++ {
+		total += lipgloss.Width(tabLabels[tab])
+		if tab > 0 {
+			total += lipgloss.Width(tabSeparator)
+		}
+	}
+
+	return total
 }
 
 // innerRect is the area left inside the frame of a box at x, y with the given outer size.
@@ -91,9 +147,15 @@ func bodyHeight(height int) int {
 	return max(height-headerRows-footerRows, 0)
 }
 
-// splitWidth reserves the left column for the tree, capped so the editor keeps a minimum.
-func splitWidth(total int) int {
-	tree := clamp(total*treePercent/100, minTree, max(total-minEditorBox, minTree))
+// splitWidth reserves the left column for the tree: the explicit width when given, a percentage
+// otherwise, always capped so the editor keeps a minimum.
+func splitWidth(total, explicit int) int {
+	reserve := explicit
+	if reserve == 0 {
+		reserve = total * treePercent / 100
+	}
+
+	tree := clamp(reserve, minTree, max(total-minEditorBox, minTree))
 
 	return clamp(tree, 0, total)
 }
@@ -130,15 +192,23 @@ func (m Model) body(width, height int) []string {
 		return fitBox(m.box(m.docker.View(), width, rows, m.focus == FocusDocker), width, rows)
 	}
 
-	treeW := splitWidth(width)
+	treeW := m.treeWidthNow(width)
 	editorW := max(width-treeW, 0)
 
-	treeLines := fitBox(m.box(m.tree.View(), treeW, rows, m.focus == FocusTree), treeW, rows)
 	editorLines := fitBox(m.box(m.editorBox(innerCells(editorW), innerCells(rows)), editorW, rows, m.focus == FocusEditor), editorW, rows)
+	if treeW == 0 {
+		return editorLines // a collapsed tree leaves the whole width to the editor
+	}
+
+	treeLines := fitBox(m.box(m.tree.View(), treeW, rows, m.focus == FocusTree), treeW, rows)
 
 	out := make([]string, 0, rows)
 	for i := range treeLines {
 		out = append(out, treeLines[i]+editorLines[i])
+	}
+
+	if m.dragging {
+		out = m.paintSplitter(out, treeW)
 	}
 
 	return out
@@ -175,7 +245,18 @@ func (m Model) editorBox(width, height int) string {
 		styles.Placeholder.Render("selecciona un archivo"))
 }
 
+// tabsLine renders the top labels plus, in the Files tab, the tree button on the right.
 func (m Model) tabsLine(width int) string {
+	row := m.tabLabelsLine()
+	if rect := m.collapseBounds(width); rect.Dx() > 0 {
+		row = padLine(row, rect.Min.X) + styles.Tab.Render(m.collapseLabel())
+	}
+
+	return padLine(row, width)
+}
+
+// tabLabelsLine renders the labels of every tab with their separators.
+func (m Model) tabLabelsLine() string {
 	parts := make([]string, 0, tabCount*2-1)
 
 	for tab := Tab(0); tab < tabCount; tab++ {
@@ -191,7 +272,7 @@ func (m Model) tabsLine(width int) string {
 		parts = append(parts, style.Render(tabLabels[tab]))
 	}
 
-	return padLine(strings.Join(parts, ""), width)
+	return strings.Join(parts, "")
 }
 
 // statusLine shows the repo, the tab, the focus, the hints, the spinner and the toast.
@@ -318,6 +399,31 @@ func overlayBox(base, box string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
+// splitterGlyph is the colour of the shared border: the accent marks the handle while dragging.
+func (m Model) splitterGlyph() lipgloss.Style {
+	if m.dragging {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(styles.CurrentTheme().Accent))
+	}
+
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(styles.CurrentTheme().Border))
+}
+
+// paintSplitter redraws the two cells of the shared border with the handle token.
+func (m Model) paintSplitter(rows []string, treeW int) []string {
+	if !m.canSplit() {
+		return rows
+	}
+
+	handle := m.splitterGlyph().Render("││")
+
+	// The top and the bottom rows keep the corners of the two boxes.
+	for i := 1; i < len(rows)-1; i++ {
+		rows[i] = clipCells(rows[i], treeW-1) + handle + tailCells(rows[i], treeW+1)
+	}
+
+	return rows
+}
+
 // fitBox splits a rendered view into exactly height rows, each padded to width cells.
 func fitBox(view string, width, height int) []string {
 	lines := strings.Split(view, "\n")
@@ -383,6 +489,37 @@ func clipCells(s string, width int) string {
 	}
 
 	return b.String()
+}
+
+// tailCells returns an ANSI line from its n-th visible cell, keeping the escapes of that cell.
+func tailCells(s string, cells int) string {
+	if cells <= 0 {
+		return s
+	}
+
+	var pending strings.Builder
+	visible := 0
+	inEscape := false
+
+	for i, r := range s {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+			pending.WriteRune(r)
+		case inEscape:
+			pending.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case visible == cells:
+			return pending.String() + s[i:]
+		default:
+			visible++
+			pending.Reset()
+		}
+	}
+
+	return ""
 }
 
 func clamp(value, low, high int) int {

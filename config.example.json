@@ -1,5 +1,7 @@
 {
   "theme": "catppuccin-mocha",
+  "tree_width": 42,
+  "tree_collapsed": false,
   "keys": {
     "help": ["h"],
     "tree_down": ["n"],

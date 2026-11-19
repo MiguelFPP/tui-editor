@@ -4,10 +4,10 @@ TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploració
 y edición rápida de archivos, control completo de Git y monitorización de
 contenedores Docker. Funciona con teclado y ratón.
 
-Estado actual: **v0.5.0 (temas y atajos configurables)**. Sobre v0.4.0, esta
-versión añade un catálogo de cuatro temas, configuración JSON en XDG para tema y
-atajos, ayuda/footers generados desde el registro y un overlay `,` para
-consultar la configuración. Los instaladores no cambian.
+Estado actual: **v0.6.0 (splitter y árbol minimizable)**. Sobre v0.5.0, esta
+versión añade el redimensionado del árbol con el ratón y con el teclado, el
+botón y la tecla para minimizarlo, y la persistencia de `tree_width` y
+`tree_collapsed` en `config.json`. Los instaladores no cambian.
 
 ## Demo
 
@@ -153,14 +153,14 @@ Opciones de `install.sh`:
 ```bash
 # Versión concreta y directorio propio
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
-  | sh -s -- --version v0.5.0 --dir "$HOME/bin"
+  | sh -s -- --version v0.6.0 --dir "$HOME/bin"
 
 # Sin verificar el checksum (no recomendado)
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
   | sh -s -- --no-verify
 ```
 
-Opciones de `install.ps1`: `-Version v0.5.0`, `-Dir C:\Tools\tui-editor`,
+Opciones de `install.ps1`: `-Version v0.6.0`, `-Dir C:\Tools\tui-editor`,
 `-NoVerify` y `-NoPath` (no tocar el `PATH` de usuario).
 
 Ningún instalador requiere `sudo` por sí mismo: si escribes en un directorio del
@@ -191,12 +191,12 @@ linux/darwin/windows × amd64/arm64, más un `checksums.txt`, desde la página d
 [releases](https://github.com/MiguelFPP/tui-editor/releases).
 
 El nombre del asset **incluye la versión**, así que sustituye `<version>` por la
-versión publicada (por ejemplo `0.5.0`; el prefijo `v` no forma parte del
+versión publicada (por ejemplo `0.6.0`; el prefijo `v` no forma parte del
 nombre):
 
 ```bash
 # Linux amd64
-version=0.5.0
+version=0.6.0
 curl -fL -O "https://github.com/MiguelFPP/tui-editor/releases/download/v${version}/tui-editor_${version}_linux_amd64.tar.gz"
 tar -xzf "tui-editor_${version}_linux_amd64.tar.gz"
 ./tui-editor --version
@@ -238,7 +238,7 @@ Para inyectar la versión igual que GoReleaser:
 
 ```bash
 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.5.0 -X main.commit=$(git rev-parse --short HEAD)" \
+  -ldflags "-s -w -X main.version=0.6.0 -X main.commit=$(git rev-parse --short HEAD)" \
   -o tui-editor ./cmd/tui-editor
 ```
 
@@ -280,18 +280,21 @@ el socket no está montado, así que el panel aparece como “no disponible”.
 
 ## Configuración
 
-La configuración vive en un único archivo JSON (tema y atajos) y se resuelve en
-tres niveles —flags, variables de entorno y archivo— con esta correspondencia:
+La configuración vive en un único archivo JSON (tema, atajos y layout del árbol)
+y se resuelve en tres niveles —flags, variables de entorno y archivo— con esta
+correspondencia:
 
 | Dato | Flag | Env | Archivo | Default |
 | :--- | :--- | :--- | :--- | :--- |
 | Ruta del archivo | `--config FILE` | `TUI_EDITOR_CONFIG` | — | `$XDG_CONFIG_HOME/tui-editor/config.json` (`os.UserConfigDir()/tui-editor/config.json`) |
 | Tema | `--theme NAME` | `TUI_EDITOR_THEME` | `theme` | `tokyonight-night` |
 | Atajos | — | — | `keys` | defaults del registro |
+| Layout del árbol | — | — | `tree_width` / `tree_collapsed` | `0` / `false` (`0` = automático, 35 %) |
 
 La precedencia es **flags > env > archivo > defaults**: el flag gana a la variable
 de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
-default.
+default. El layout del árbol solo vive en el archivo: no tiene flag ni variable de
+entorno.
 
 El repositorio incluye [`config.example.json`](config.example.json) como
 plantilla versionada con overrides de ejemplo; no se carga automáticamente.
@@ -310,6 +313,8 @@ Ejemplo de archivo:
 ```json
 {
   "theme": "catppuccin-mocha",
+  "tree_width": 42,
+  "tree_collapsed": false,
   "keys": {
     "quit": ["q"],
     "help": ["?"],
@@ -342,6 +347,28 @@ Sobre el bloque `keys`:
   configurables o fijas.
 - `--list-themes` imprime el catálogo y marca el default.
 
+Fuera de `keys`, el archivo guarda el layout del árbol: `tree_width` es el ancho
+exterior de la columna del árbol (`0` = automático, el 35 % del ancho),
+`tree_collapsed` arranca la pestaña `Files` con el árbol minimizado y un
+`tree_width` negativo es un error.
+
+### Layout del árbol
+
+El reparto de ancho entre el árbol y el preview de la pestaña `Files` se ajusta
+de tres maneras:
+
+- Arrastrar con el ratón el borde compartido: al soltar, el ancho nuevo se
+  guarda.
+- `F2`, o el botón `[<]`/`[>]` de la fila de pestañas, minimiza el árbol o lo
+  vuelve a mostrar; el ancho se conserva mientras está oculto.
+- `shift+left` / `shift+right` reducen o amplían el árbol dos celdas por
+  pulsación. El ancho se acota en ambos extremos para que los dos paneles
+  conserven un mínimo.
+
+El layout se guarda solo en `config.json` al cambiarlo, con `tree_width` y
+`tree_collapsed`: el resto del archivo (tema y atajos) se conserva y, si no
+existía, se crea. No hay recarga en caliente.
+
 ### Archivo base
 
 ```bash
@@ -351,10 +378,10 @@ tui-editor --print-config
 ```
 
 - `--init-config` escribe un archivo base mínimo (`theme: tokyonight-night`,
-  `keys: {}`) en la ruta resuelta (XDG o `--config`); no sobrescribe sin
-  `--force`.
+  `tree_width: 0`, `tree_collapsed: false`, `keys: {}`) en la ruta resuelta (XDG o
+  `--config`); no sobrescribe sin `--force`.
 - `--print-config` imprime la configuración resuelta en JSON con `config_path`,
-  `theme` y `keys`; no arranca la TUI.
+  `theme`, `tree_width`, `tree_collapsed` y `keys`; no arranca la TUI.
 - `config.example.json` es una plantilla con overrides de ejemplo; no se carga
   automáticamente.
 
@@ -405,6 +432,8 @@ salir.
 | `1` / `2` / `3` | Cambiar de pestaña (`Files`, `Git`, `Docker`) |
 | clic en la pestaña | Cambiar de pestaña, con el mismo efecto que `1`/`2`/`3` |
 | `tab` / `shift+tab` | Alternar el foco en `Files`; cambiar de sección en `Git` |
+| `F2` | Minimizar el árbol de `Files` o volver a mostrarlo |
+| `shift+left` / `shift+right` | Redimensionar el árbol de `Files` dos celdas por pulsación |
 | `?` | Mostrar u ocultar la ayuda |
 | `,` | Ver la configuración (overlay read-only) |
 | `esc` | Cerrar la ayuda o reenviar la tecla al panel |
@@ -575,8 +604,8 @@ El release se dispara con un tag `v*`:
 
 ```bash
 # el usuario crea el tag; el workflow .github/workflows/release.yml publica
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 El workflow usa GoReleaser v2.20.2 (`.goreleaser.yaml`) y `GITHUB_TOKEN` para
@@ -587,7 +616,7 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 
 | Flag | Default | Descripción |
 | --- | --- | --- |
-| `--version` | — | Imprime `tui-editor 0.5.0` (builds de release añaden el commit) y sale con código 0 |
+| `--version` | — | Imprime `tui-editor 0.6.0` (builds de release añaden el commit) y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |

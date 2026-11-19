@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-19
+
+Resizable and collapsible file tree.
+
+### Added
+
+- The shared border of the `Files` tab is draggable with the mouse: the tree
+  width follows the pointer, clamped so both panels keep a minimum, and the new
+  width is saved on release.
+- `F2` and the `[<]`/`[>]` button of the tab row collapse and expand the tree.
+  Collapsing hands the whole width to the editor and moves the focus there while
+  the tree keeps its cursor, filter and expanded folders.
+- `shift+left` / `shift+right` resize the tree two cells per press.
+- `tree_width` and `tree_collapsed` in the JSON configuration persist the layout.
+  They are written when the layout changes, creating the file when missing and
+  preserving the theme and key overrides of an existing one.
+
+### Changed
+
+- `--print-config` also prints `tree_width` and `tree_collapsed`, and
+  `--init-config` writes both fields in the base file.
+
+### Fixed
+
+- The `config` action test used `F2`, which now belongs to the tree toggle.
+
 ## [0.5.0] - 2026-11-19
 
 Configurable themes and keybindings.
@@ -171,7 +197,8 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
-[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.1...v0.4.0
 [0.3.2]: https://github.com/MiguelFPP/tui-editor/commit/a9896df

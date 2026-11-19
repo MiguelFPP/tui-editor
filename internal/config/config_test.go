@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -552,6 +553,59 @@ func TestParseConfigKeysPreserved(t *testing.T) {
 	}
 }
 
+func TestParseConfigTreeLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"tree_width":42,"tree_collapsed":true}`)
+
+	cfg, err := Parse([]string{"--config", path}, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.TreeWidth != 42 {
+		t.Errorf("TreeWidth = %d, want 42", cfg.TreeWidth)
+	}
+	if !cfg.TreeCollapsed {
+		t.Error("TreeCollapsed = false, want true")
+	}
+	// Both paths are set for a loaded file: ConfigPath marks the load and
+	// SavePath is where a layout change lands.
+	if cfg.ConfigPath != path {
+		t.Errorf("ConfigPath = %q, want %q", cfg.ConfigPath, path)
+	}
+	if cfg.SavePath != path {
+		t.Errorf("SavePath = %q, want %q", cfg.SavePath, path)
+	}
+}
+
+func TestParseSavePathWithoutFile(t *testing.T) {
+	dir := withDefaultConfigDir(t)
+	want := filepath.Join(dir, "tui-editor", "config.json")
+
+	cfg, err := Parse(nil, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.SavePath != want {
+		t.Errorf("SavePath = %q, want %q", cfg.SavePath, want)
+	}
+	if cfg.ConfigPath != "" {
+		t.Errorf("ConfigPath = %q, want empty for an unloaded file", cfg.ConfigPath)
+	}
+	if cfg.TreeWidth != 0 || cfg.TreeCollapsed {
+		t.Errorf("Parse() = %+v, want zero tree layout", cfg)
+	}
+}
+
+func TestParseConfigTreeWidthNegative(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"tree_width":-1}`)
+
+	_, err := Parse([]string{"--config", path}, noEnv)
+	if !errors.Is(err, ErrConfigFormat) {
+		t.Fatalf("Parse() error = %v, want %v", err, ErrConfigFormat)
+	}
+}
+
 func TestParseVersionSkipsConfigLoad(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.json")
 
@@ -880,4 +934,138 @@ func TestWriteDefaultDirectoryTarget(t *testing.T) {
 	if len(entries) != 1 || entries[0].Name() != "config.json" {
 		t.Errorf("directorio = %v, want solo config.json", entries)
 	}
+}
+
+func TestSaveLayoutCreatesFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "deeper")
+	path := filepath.Join(dir, "config.json")
+
+	if err := SaveLayout(path, 42, true); err != nil {
+		t.Fatalf("SaveLayout() error = %v, want nil", err)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("os.Stat(%s) error = %v", dir, err)
+	}
+	if !info.IsDir() {
+		t.Errorf("os.Stat(%s).IsDir() = false, want true", dir)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	if !bytes.HasSuffix(body, []byte("\n")) {
+		t.Errorf("contenido = %q, want a trailing newline", body)
+	}
+
+	// A brand new file only carries the layout: theme and keys stay omitted.
+	var fields map[string]any
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, ok := fields["theme"]; ok {
+		t.Errorf("contenido = %q, want no theme key", body)
+	}
+	if _, ok := fields["keys"]; ok {
+		t.Errorf("contenido = %q, want no keys key", body)
+	}
+	if got := fields["tree_width"]; got != float64(42) {
+		t.Errorf("tree_width = %v, want 42", got)
+	}
+	if got := fields["tree_collapsed"]; got != true {
+		t.Errorf("tree_collapsed = %v, want true", got)
+	}
+
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("os.Stat() error = %v", err)
+	}
+	// Windows only tracks the read-only attribute, so the mode is not asserted.
+	if perm := info.Mode().Perm(); perm != 0o600 && runtime.GOOS != "windows" {
+		t.Errorf("permisos = %v, want 0600", perm)
+	}
+
+	cfg, err := Parse([]string{"--config", path}, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.TreeWidth != 42 || !cfg.TreeCollapsed {
+		t.Errorf("Parse() = %+v, want tree_width 42 and collapsed", cfg)
+	}
+}
+
+func TestSaveLayoutPreservesThemeAndKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeConfigFile(t, path, `{"theme":"dracula","tree_width":10,"keys":{"quit":["q","c"]}}`)
+
+	if err := SaveLayout(path, 30, false); err != nil {
+		t.Fatalf("SaveLayout() error = %v, want nil", err)
+	}
+
+	// The rewritten file must parse again with the theme and keys intact.
+	cfg, err := Parse([]string{"--config", path}, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.Theme != "dracula" {
+		t.Errorf("Theme = %q, want %q", cfg.Theme, "dracula")
+	}
+	if cfg.TreeWidth != 30 {
+		t.Errorf("TreeWidth = %d, want 30", cfg.TreeWidth)
+	}
+	if cfg.TreeCollapsed {
+		t.Error("TreeCollapsed = true, want false")
+	}
+	if got := cfg.Keys["quit"]; !slices.Equal(got, []string{"q", "c"}) {
+		t.Errorf("Keys[quit] = %v, want [q c]", got)
+	}
+
+	// The atomic write must not leave temporary files behind.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("os.ReadDir() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "config.json" {
+		t.Errorf("directorio = %v, want solo config.json", entries)
+	}
+}
+
+func TestSaveLayoutInvalidFileNotOverwritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := `{"theme":`
+	writeConfigFile(t, path, body)
+
+	if err := SaveLayout(path, 30, true); !errors.Is(err, ErrConfigFormat) {
+		t.Fatalf("SaveLayout() error = %v, want %v", err, ErrConfigFormat)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("contenido = %q, want %q", got, body)
+	}
+}
+
+func TestSaveLayoutRejectsInvalidArgs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+
+	t.Run("negative width", func(t *testing.T) {
+		if err := SaveLayout(path, -1, false); !errors.Is(err, ErrConfigFormat) {
+			t.Fatalf("SaveLayout() error = %v, want %v", err, ErrConfigFormat)
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("SaveLayout() touched %s (err = %v), want no I/O", path, err)
+		}
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		if err := SaveLayout("   ", 10, false); !errors.Is(err, ErrConfigFile) {
+			t.Fatalf("SaveLayout() error = %v, want %v", err, ErrConfigFile)
+		}
+	})
 }

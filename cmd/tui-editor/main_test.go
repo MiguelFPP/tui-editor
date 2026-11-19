@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -89,9 +90,11 @@ func TestPrintKeys(t *testing.T) {
 
 // configOutput mirrors the JSON document written by printConfig.
 type configOutput struct {
-	ConfigPath string              `json:"config_path"`
-	Theme      string              `json:"theme"`
-	Keys       map[string][]string `json:"keys"`
+	ConfigPath    string              `json:"config_path"`
+	Theme         string              `json:"theme"`
+	TreeWidth     int                 `json:"tree_width"`
+	TreeCollapsed bool                `json:"tree_collapsed"`
+	Keys          map[string][]string `json:"keys"`
 }
 
 // decodeConfigOutput parses the JSON emitted by printConfig.
@@ -127,15 +130,50 @@ func TestExampleConfigIsValid(t *testing.T) {
 	if _, ok := styles.ThemeByName(cfg.Theme); !ok {
 		t.Errorf("ThemeByName(%q) = false, want true", cfg.Theme)
 	}
+	if cfg.TreeWidth != 42 {
+		t.Errorf("TreeWidth = %d, want 42", cfg.TreeWidth)
+	}
+	if cfg.TreeCollapsed {
+		t.Error("TreeCollapsed = true, want false")
+	}
+}
+
+func TestInitConfigTemplateHasTreeLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "config.json")
+
+	if err := config.WriteDefault(path, false); err != nil {
+		t.Fatalf("WriteDefault() error = %v, want nil", err)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("template = %q, want %s", body, want)
+		}
+	}
+
+	// The template must stay a valid, strictly-parsed config file.
+	cfg, err := config.Parse([]string{"--config", path, "--repo", t.TempDir()}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.TreeWidth != 0 || cfg.TreeCollapsed {
+		t.Errorf("Parse() = %+v, want zero tree layout", cfg)
+	}
 }
 
 func TestPrintConfig(t *testing.T) {
 	var out bytes.Buffer
 
 	cfg := config.Config{
-		ConfigPath: "/tmp/config.json",
-		Theme:      "dracula",
-		Keys:       map[string][]string{"quit": {"q", "c"}, "docker_logs": {"o"}},
+		ConfigPath:    "/tmp/config.json",
+		Theme:         "dracula",
+		TreeWidth:     42,
+		TreeCollapsed: true,
+		Keys:          map[string][]string{"quit": {"q", "c"}, "docker_logs": {"o"}},
 	}
 
 	if err := printConfig(&out, cfg); err != nil {
@@ -149,6 +187,12 @@ func TestPrintConfig(t *testing.T) {
 	if got.Theme != "dracula" {
 		t.Errorf("theme = %q, want %q", got.Theme, "dracula")
 	}
+	if got.TreeWidth != 42 {
+		t.Errorf("tree_width = %d, want 42", got.TreeWidth)
+	}
+	if !got.TreeCollapsed {
+		t.Error("tree_collapsed = false, want true")
+	}
 	if !slices.Equal(got.Keys["quit"], []string{"q", "c"}) {
 		t.Errorf("keys[quit] = %v, want [q c]", got.Keys["quit"])
 	}
@@ -157,6 +201,21 @@ func TestPrintConfig(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\n  \"theme\":") {
 		t.Errorf("salida = %q, want JSON indentado con dos espacios", out.String())
+	}
+
+	// The field order stays stable: config_path, theme, tree_width,
+	// tree_collapsed, keys.
+	last := -1
+	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"keys"`} {
+		index := strings.Index(out.String(), key)
+		if index < 0 {
+			t.Fatalf("salida no incluye %s: %q", key, out.String())
+		}
+		if index < last {
+			t.Errorf("orden de campos incorrecto en %q", out.String())
+		}
+
+		last = index
 	}
 }
 
@@ -171,6 +230,12 @@ func TestPrintConfigDefaultTheme(t *testing.T) {
 	if got.Theme != styles.DefaultTheme().Name {
 		t.Errorf("theme = %q, want %q", got.Theme, styles.DefaultTheme().Name)
 	}
+	if got.TreeWidth != 0 {
+		t.Errorf("tree_width = %d, want 0", got.TreeWidth)
+	}
+	if got.TreeCollapsed {
+		t.Error("tree_collapsed = true, want false")
+	}
 	if got.Keys == nil {
 		t.Error("keys = nil, want an empty object")
 	}
@@ -179,6 +244,12 @@ func TestPrintConfigDefaultTheme(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"keys": {}`) {
 		t.Errorf("salida = %q, want un objeto keys vacío", out.String())
+	}
+	if !strings.Contains(out.String(), `"tree_width": 0`) {
+		t.Errorf("salida = %q, want la clave tree_width", out.String())
+	}
+	if !strings.Contains(out.String(), `"tree_collapsed": false`) {
+		t.Errorf("salida = %q, want la clave tree_collapsed", out.String())
 	}
 }
 
