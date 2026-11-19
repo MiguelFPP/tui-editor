@@ -68,6 +68,12 @@ const (
 
 	// maxErrorCells bounds the line the panel shows for a failure it does not recognise.
 	maxErrorCells = 160
+
+	// gitSplitMinWidth is the panel width below which the list and the preview share one column.
+	gitSplitMinWidth = 100
+	minGitList       = 28
+	minGitPreview    = 34
+	listPercent      = 40
 )
 
 // Section is one navigable block of the panel.
@@ -91,6 +97,31 @@ func (s Section) String() string {
 	}
 
 	return sectionLabels[s]
+}
+
+// Layout is the preferred shape of the Changes and Diff sections.
+type Layout uint8
+
+const (
+	LayoutSplit Layout = iota
+	LayoutSingle
+)
+
+func (l Layout) String() string {
+	if l == LayoutSingle {
+		return "single"
+	}
+
+	return "split"
+}
+
+// ParseLayout reads the persisted preference; an empty or unknown value keeps split.
+func ParseLayout(raw string) Layout {
+	if strings.EqualFold(strings.TrimSpace(raw), "single") {
+		return LayoutSingle
+	}
+
+	return LayoutSplit
 }
 
 // statusLoadedMsg carries one refresh of the working tree.
@@ -187,6 +218,15 @@ type Model struct {
 	tabRects [sectionCount]image.Rectangle
 	hunkRows []rowSpan
 
+	// Layout of the Changes and Diff sections: the persisted preference, the mode in force and
+	// the inner rectangles of both columns.
+	layout      Layout
+	split       bool
+	listW       int
+	previewW    int
+	listRect    image.Rectangle
+	previewRect image.Rectangle
+
 	help bool
 }
 
@@ -267,6 +307,11 @@ type seqState struct {
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
 // falls back to the built-in defaults.
 func New(git ports.GitService, keys keymap.Registry) Model {
+	return NewWithLayout(git, keys, LayoutSplit)
+}
+
+// NewWithLayout builds the panel with the persisted layout preference.
+func NewWithLayout(git ports.GitService, keys keymap.Registry, layout Layout) Model {
 	if len(keys.All()) == 0 {
 		keys = keymap.Default()
 	}
@@ -274,6 +319,7 @@ func New(git ports.GitService, keys keymap.Registry) Model {
 	m := Model{
 		git:     git,
 		keys:    keys,
+		layout:  layout,
 		loading: loadingState{status: true, branches: true},
 		seqs:    seqState{status: 1, branches: 1},
 		marked:  make(map[int]bool),
@@ -408,7 +454,8 @@ func (m *Model) SetBounds(x, y, width, height int) {
 	m.sync()
 }
 
-// sync rebuilds the cached diff body and the hit-test rectangles; View only composes them.
+// sync rebuilds the cached diff body, the column geometry and the hit-test rectangles; View only
+// composes them.
 func (m *Model) sync() {
 	if !m.loaded {
 		m.diffBody, m.diffLines, m.hunkRows = "", nil, nil
@@ -418,7 +465,55 @@ func (m *Model) sync() {
 		m.hunkRows = diffSpans(m.diff)
 	}
 
+	m.split = m.splitNow()
+	m.listW, m.previewW = m.splitWidths(m.width)
+	m.markColumns()
+
 	m.clamp(m.section)
+}
+
+// splitNow reports whether the active section shows the list and the preview side by side.
+func (m Model) splitNow() bool {
+	if m.layout == LayoutSingle || m.width < gitSplitMinWidth {
+		return false
+	}
+
+	return m.section == Changes || m.section == Diff
+}
+
+// splitWidths divides the panel width between both columns; in single mode the list takes it all.
+func (m Model) splitWidths(panelW int) (int, int) {
+	if !m.split {
+		return max(panelW, 0), 0
+	}
+
+	high := max(panelW-minGitPreview, minGitList)
+	list := min(max(panelW*listPercent/100, minGitList), high)
+
+	return list, max(panelW-list, 0)
+}
+
+// markColumns stores the inner rectangle of each column, or a single one when they share the body.
+func (m *Model) markColumns() {
+	m.listRect, m.previewRect = image.Rectangle{}, image.Rectangle{}
+	if m.width <= 0 {
+		return
+	}
+
+	top := m.bounds.Min.Y + headerRows
+	height := m.bodyHeight()
+	if height <= 0 {
+		return
+	}
+
+	if !m.split {
+		m.listRect = image.Rect(m.bounds.Min.X, top, m.bounds.Min.X+m.width, top+height)
+
+		return
+	}
+
+	m.listRect = image.Rect(m.bounds.Min.X, top, m.bounds.Min.X+m.listW, top+height)
+	m.previewRect = image.Rect(m.bounds.Min.X+m.listW, top, m.bounds.Min.X+m.listW+m.previewW, top+height)
 }
 
 // diffSpans locates every hunk inside the rows of the diff section, its title line included.
