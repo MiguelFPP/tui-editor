@@ -182,14 +182,17 @@ func (m Model) body() []string {
 		return pad([]string{state}, height)
 	}
 
-	rows := m.active()
+	rows := m.collapsedRows()
 	start := m.offsets[m.section]
+	if m.listCollapsed {
+		start = m.scrollPreview
+	}
 	end := min(start+height, len(rows))
 
 	window := make([]string, 0, height)
 	for i := start; i < end; i++ {
 		line := truncate(rows[i], m.width)
-		if i == m.cursors[m.section] {
+		if i == m.cursorRow() {
 			line = styles.CursorPlain.Render(line)
 		}
 
@@ -415,6 +418,16 @@ func (m Model) column(rows []string, offset, cursor, width, height int) []string
 	return out
 }
 
+// cursorRow is the highlighted row of the single column: the hunk cursor of a collapsed preview,
+// or the cursor of the active section.
+func (m Model) cursorRow() int {
+	if m.listCollapsed && (m.section == Diff || m.loaded) {
+		return m.hunkCursorRow()
+	}
+
+	return m.cursors[m.section]
+}
+
 // hunkCursorRow is the row of the preview that starts the hunk under the cursor; the section header
 // occupies the first row.
 func (m Model) hunkCursorRow() int {
@@ -501,7 +514,10 @@ func (m Model) footerText() string {
 	)
 
 	if m.section == Changes || m.section == Diff {
-		parts = append(parts, m.keys.Label(keymap.ActionGitLayoutToggle)+": columnas")
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitLayoutToggle)+": columnas",
+			m.keys.Label(keymap.ActionGitToggleList)+": lista",
+		)
 	}
 
 	switch m.section {
@@ -593,6 +609,8 @@ func (m Model) helpLines() []string {
 			"alternar una o dos columnas en Cambios y Diff"),
 		helpRow(m.keys.Label(keymap.ActionGitWidthShrink)+" / "+m.keys.Label(keymap.ActionGitWidthGrow),
 			"reducir o ampliar la lista (también arrastrando el borde)"),
+		helpRow(m.keys.Label(keymap.ActionGitToggleList),
+			"minimizar la lista y dejar el diff a todo el ancho"),
 		helpRow(m.keys.Label(keymap.ActionGitFetch)+" / "+m.keys.Label(keymap.ActionGitPull)+" / "+m.keys.Label(keymap.ActionGitPush),
 			"fetch, pull y push"),
 		helpRow(m.keys.Label(keymap.ActionGitBack),

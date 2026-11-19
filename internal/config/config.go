@@ -20,24 +20,25 @@ import (
 // and exit; InitConfig writes a template and PrintConfig dumps the resolved
 // values, so no repo, editor or Docker validation runs for them.
 type Config struct {
-	ShowVersion   bool
-	ListThemes    bool
-	ListKeys      bool
-	InitConfig    bool
-	Force         bool
-	PrintConfig   bool
-	Repo          string
-	Editor        string
-	DockerHost    string
-	DebugLog      string
-	ConfigPath    string
-	Theme         string
-	Keys          map[string][]string
-	TreeWidth     int
-	TreeCollapsed bool
-	GitLayout     string
-	GitListWidth  int
-	SavePath      string
+	ShowVersion      bool
+	ListThemes       bool
+	ListKeys         bool
+	InitConfig       bool
+	Force            bool
+	PrintConfig      bool
+	Repo             string
+	Editor           string
+	DockerHost       string
+	DebugLog         string
+	ConfigPath       string
+	Theme            string
+	Keys             map[string][]string
+	TreeWidth        int
+	TreeCollapsed    bool
+	GitLayout        string
+	GitListWidth     int
+	GitListCollapsed bool
+	SavePath         string
 }
 
 // Usage is the help text shown when -h or --help is requested.
@@ -196,12 +197,13 @@ func loadConfig(configPath, theme string) (Config, error) {
 	}
 
 	cfg := Config{
-		Theme:         effectiveTheme,
-		Keys:          fileCfg.keyOverrides(),
-		TreeWidth:     fileCfg.TreeWidth,
-		TreeCollapsed: fileCfg.TreeCollapsed,
-		GitLayout:     fileCfg.GitLayout,
-		GitListWidth:  fileCfg.GitListWidth,
+		Theme:            effectiveTheme,
+		Keys:             fileCfg.keyOverrides(),
+		TreeWidth:        fileCfg.TreeWidth,
+		TreeCollapsed:    fileCfg.TreeCollapsed,
+		GitLayout:        fileCfg.GitLayout,
+		GitListWidth:     fileCfg.GitListWidth,
+		GitListCollapsed: fileCfg.GitListCollapsed,
 	}
 	if loaded {
 		cfg.ConfigPath = path

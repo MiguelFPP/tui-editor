@@ -27,14 +27,15 @@ func releaseAt(x, y int) tea.MouseReleaseMsg {
 
 // saveRecorder collects the layout save calls.
 type saveRecorder struct {
-	layouts []Layout
-	widths  []int
-	errors  []error
+	layouts   []Layout
+	widths    []int
+	collapsed []bool
 }
 
-func (r *saveRecorder) save(layout Layout, width int) error {
+func (r *saveRecorder) save(layout Layout, width int, collapsed bool) error {
 	r.layouts = append(r.layouts, layout)
 	r.widths = append(r.widths, width)
+	r.collapsed = append(r.collapsed, collapsed)
 
 	return nil
 }

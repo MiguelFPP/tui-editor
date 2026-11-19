@@ -240,10 +240,12 @@ type Model struct {
 	previewRect  image.Rectangle
 	splitterRect image.Rectangle
 
-	// listWidth is the explicit width of the left column; zero means the automatic ratio.
-	listWidth int
-	dragging  bool
-	dragDirty bool
+	// listWidth is the explicit width of the left column; zero means the automatic ratio;
+	// listCollapsed hides the list and hands the whole width to the preview.
+	listWidth     int
+	listCollapsed bool
+	dragging      bool
+	dragDirty     bool
 
 	// scrollList and scrollPreview are the independent offsets of the two columns.
 	scrollList    int
@@ -253,8 +255,9 @@ type Model struct {
 	highlighted  []string
 	highlightKey string
 
-	// saveLayout persists the layout preference and the list width; nil means they are not persisted.
-	saveLayout func(Layout, int) error
+	// saveLayout persists the layout preference, the width and the collapsed state; nil means the
+	// panel does not persist anything.
+	saveLayout func(Layout, int, bool) error
 
 	help bool
 }
@@ -341,9 +344,10 @@ func New(git ports.GitService, keys keymap.Registry) Model {
 
 // Options configures the panel at construction.
 type Options struct {
-	Layout     Layout
-	ListWidth  int
-	SaveLayout func(Layout, int) error
+	Layout        Layout
+	ListWidth     int
+	ListCollapsed bool
+	SaveLayout    func(Layout, int, bool) error
 }
 
 // NewWithOptions builds the panel with the persisted layout and the save seam.
@@ -353,16 +357,17 @@ func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Mo
 	}
 
 	m := Model{
-		git:        git,
-		keys:       keys,
-		layout:     opts.Layout,
-		listWidth:  max(opts.ListWidth, 0),
-		saveLayout: opts.SaveLayout,
-		loading:    loadingState{status: true, branches: true},
-		seqs:       seqState{status: 1, branches: 1},
-		marked:     make(map[int]bool),
-		commit:     newCommitModal(defaultWidth, defaultHeight),
-		prompt:     newPromptModal(promptNone, defaultWidth),
+		git:           git,
+		keys:          keys,
+		layout:        opts.Layout,
+		listWidth:     max(opts.ListWidth, 0),
+		listCollapsed: opts.ListCollapsed,
+		saveLayout:    opts.SaveLayout,
+		loading:       loadingState{status: true, branches: true},
+		seqs:          seqState{status: 1, branches: 1},
+		marked:        make(map[int]bool),
+		commit:        newCommitModal(defaultWidth, defaultHeight),
+		prompt:        newPromptModal(promptNone, defaultWidth),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
@@ -511,7 +516,7 @@ func (m *Model) sync() {
 
 	// Both column offsets survive a resize, clamped to the rows they now have.
 	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()), m.listViewportHeight())
-	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.previewRows()), m.previewViewportHeight())
+	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.collapsedRows()), m.previewViewportHeight())
 
 	m.clamp(m.section)
 }
@@ -533,7 +538,7 @@ func (m *Model) highlightedPreview() []string {
 
 // splitNow reports whether the active section shows the list and the preview side by side.
 func (m Model) splitNow() bool {
-	if m.layout == LayoutSingle || m.width < gitSplitMinWidth {
+	if m.layout == LayoutSingle || m.listCollapsed || m.width < gitSplitMinWidth {
 		return false
 	}
 
@@ -558,6 +563,20 @@ func (m Model) listRows() []string {
 	}
 
 	return m.active()
+}
+
+// collapsedRows returns the preview rows of a collapsed list, so hiding the list never hides the
+// diff: the whole body shows it.
+func (m Model) collapsedRows() []string {
+	if !m.listCollapsed {
+		return m.active()
+	}
+
+	if m.section == Changes && !m.loaded {
+		return m.changeRows() // nothing to preview yet: keep the list visible
+	}
+
+	return m.diffRows()
 }
 
 // previewRows returns the rows of the right column, already formatted.

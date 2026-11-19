@@ -88,8 +88,9 @@ type Deps struct {
 	// SaveLayout persists the tree layout; nil means the layout is not persisted.
 	SaveLayout func(width int, collapsed bool) error
 
-	// SaveGitLayout persists the Git panel layout and the list width; nil means it is not persisted.
-	SaveGitLayout func(layout string, listWidth int) error
+	// SaveGitLayout persists the Git panel layout, the list width and its collapsed state; nil
+	// means it is not persisted.
+	SaveGitLayout func(layout string, listWidth int, listCollapsed bool) error
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -180,15 +181,16 @@ func New(deps Deps) Model {
 // gitOptions maps the persisted preference and the save seam onto the panel options.
 func gitOptions(deps Deps) gitpanel.Options {
 	opts := gitpanel.Options{
-		Layout:    gitpanel.ParseLayout(deps.Config.GitLayout),
-		ListWidth: deps.Config.GitListWidth,
+		Layout:        gitpanel.ParseLayout(deps.Config.GitLayout),
+		ListWidth:     deps.Config.GitListWidth,
+		ListCollapsed: deps.Config.GitListCollapsed,
 	}
 	if deps.SaveGitLayout == nil {
 		return opts
 	}
 
-	opts.SaveLayout = func(layout gitpanel.Layout, width int) error {
-		return deps.SaveGitLayout(layout.String(), width)
+	opts.SaveLayout = func(layout gitpanel.Layout, width int, collapsed bool) error {
+		return deps.SaveGitLayout(layout.String(), width, collapsed)
 	}
 
 	return opts

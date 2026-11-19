@@ -90,13 +90,14 @@ func TestPrintKeys(t *testing.T) {
 
 // configOutput mirrors the JSON document written by printConfig.
 type configOutput struct {
-	ConfigPath    string              `json:"config_path"`
-	Theme         string              `json:"theme"`
-	TreeWidth     int                 `json:"tree_width"`
-	TreeCollapsed bool                `json:"tree_collapsed"`
-	GitLayout     string              `json:"git_layout"`
-	GitListWidth  int                 `json:"git_list_width"`
-	Keys          map[string][]string `json:"keys"`
+	ConfigPath       string              `json:"config_path"`
+	Theme            string              `json:"theme"`
+	TreeWidth        int                 `json:"tree_width"`
+	TreeCollapsed    bool                `json:"tree_collapsed"`
+	GitLayout        string              `json:"git_layout"`
+	GitListWidth     int                 `json:"git_list_width"`
+	GitListCollapsed bool                `json:"git_list_collapsed"`
+	Keys             map[string][]string `json:"keys"`
 }
 
 // decodeConfigOutput parses the JSON emitted by printConfig.
@@ -151,7 +152,7 @@ func TestInitConfigTemplateHasTreeLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
-	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`} {
+	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`, `"git_list_collapsed"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("template = %q, want %s", body, want)
 		}
@@ -210,9 +211,9 @@ func TestPrintConfig(t *testing.T) {
 	}
 
 	// The field order stays stable: config_path, theme, tree_width,
-	// tree_collapsed, git_layout, git_list_width, keys.
+	// tree_collapsed, git_layout, git_list_width, git_list_collapsed, keys.
 	last := -1
-	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`, `"keys"`} {
+	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`, `"git_list_collapsed"`, `"keys"`} {
 		index := strings.Index(out.String(), key)
 		if index < 0 {
 			t.Fatalf("salida no incluye %s: %q", key, out.String())

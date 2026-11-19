@@ -136,8 +136,8 @@ func run() error {
 		deps.SaveLayout = func(width int, collapsed bool) error {
 			return config.SaveLayout(cfg.SavePath, width, collapsed)
 		}
-		deps.SaveGitLayout = func(layout string, listWidth int) error {
-			return config.SaveGitLayout(cfg.SavePath, layout, listWidth)
+		deps.SaveGitLayout = func(layout string, listWidth int, collapsed bool) error {
+			return config.SaveGitLayout(cfg.SavePath, layout, listWidth, collapsed)
 		}
 	}
 
@@ -229,21 +229,23 @@ func printConfig(w io.Writer, cfg config.Config) error {
 	}
 
 	out := struct {
-		ConfigPath    string              `json:"config_path"`
-		Theme         string              `json:"theme"`
-		TreeWidth     int                 `json:"tree_width"`
-		TreeCollapsed bool                `json:"tree_collapsed"`
-		GitLayout     string              `json:"git_layout"`
-		GitListWidth  int                 `json:"git_list_width"`
-		Keys          map[string][]string `json:"keys"`
+		ConfigPath       string              `json:"config_path"`
+		Theme            string              `json:"theme"`
+		TreeWidth        int                 `json:"tree_width"`
+		TreeCollapsed    bool                `json:"tree_collapsed"`
+		GitLayout        string              `json:"git_layout"`
+		GitListWidth     int                 `json:"git_list_width"`
+		GitListCollapsed bool                `json:"git_list_collapsed"`
+		Keys             map[string][]string `json:"keys"`
 	}{
-		ConfigPath:    cfg.ConfigPath,
-		Theme:         name,
-		TreeWidth:     cfg.TreeWidth,
-		TreeCollapsed: cfg.TreeCollapsed,
-		GitLayout:     gitLayoutName(cfg.GitLayout),
-		GitListWidth:  max(cfg.GitListWidth, 0),
-		Keys:          keys,
+		ConfigPath:       cfg.ConfigPath,
+		Theme:            name,
+		TreeWidth:        cfg.TreeWidth,
+		TreeCollapsed:    cfg.TreeCollapsed,
+		GitLayout:        gitLayoutName(cfg.GitLayout),
+		GitListWidth:     max(cfg.GitListWidth, 0),
+		GitListCollapsed: cfg.GitListCollapsed,
+		Keys:             keys,
 	}
 
 	enc := json.NewEncoder(w)

@@ -24,6 +24,7 @@ const BaseFile = `{
   "tree_collapsed": false,
   "git_layout": "split",
   "git_list_width": 0,
+  "git_list_collapsed": false,
   "keys": {}
 }
 `
@@ -92,8 +93,8 @@ func SaveLayout(path string, width int, collapsed bool) error {
 	return writeFileAtomic(target, string(data)+"\n", true)
 }
 
-// SaveGitLayout persists the Git panel layout: the mode and the explicit list width.
-func SaveGitLayout(path, layout string, listWidth int) error {
+// SaveGitLayout persists the Git panel layout: the mode, the list width and its collapsed state.
+func SaveGitLayout(path, layout string, listWidth int, collapsed bool) error {
 	target := strings.TrimSpace(path)
 	if target == "" {
 		return fmt.Errorf("%w: ruta vacía", ErrConfigFile)
@@ -112,6 +113,7 @@ func SaveGitLayout(path, layout string, listWidth int) error {
 
 	cfg.GitLayout = strings.TrimSpace(layout)
 	cfg.GitListWidth = listWidth
+	cfg.GitListCollapsed = collapsed
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -175,12 +177,13 @@ func writeFileAtomic(path, data string, replace bool) error {
 // The layout fields are always serialized, while an empty theme or set of keys
 // is omitted.
 type fileConfig struct {
-	Theme         string             `json:"theme,omitempty"`
-	TreeWidth     int                `json:"tree_width"`
-	TreeCollapsed bool               `json:"tree_collapsed"`
-	GitLayout     string             `json:"git_layout,omitempty"`
-	GitListWidth  int                `json:"git_list_width"`
-	Keys          map[string]KeyList `json:"keys,omitempty"`
+	Theme            string             `json:"theme,omitempty"`
+	TreeWidth        int                `json:"tree_width"`
+	TreeCollapsed    bool               `json:"tree_collapsed"`
+	GitLayout        string             `json:"git_layout,omitempty"`
+	GitListWidth     int                `json:"git_list_width"`
+	GitListCollapsed bool               `json:"git_list_collapsed"`
+	Keys             map[string]KeyList `json:"keys,omitempty"`
 }
 
 // KeyList is an action's binding: a string or a list of strings.

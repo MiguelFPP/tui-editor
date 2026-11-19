@@ -1023,7 +1023,7 @@ func TestSaveGitLayoutPreservesEveryOtherField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeConfigFile(t, path, `{"theme":"dracula","tree_width":10,"tree_collapsed":true,"keys":{"quit":["q","c"]}}`)
 
-	if err := SaveGitLayout(path, "single", 50); err != nil {
+	if err := SaveGitLayout(path, "single", 50, true); err != nil {
 		t.Fatalf("SaveGitLayout() error = %v, want nil", err)
 	}
 
@@ -1037,6 +1037,9 @@ func TestSaveGitLayoutPreservesEveryOtherField(t *testing.T) {
 	if cfg.GitListWidth != 50 {
 		t.Errorf("GitListWidth = %d, want 50", cfg.GitListWidth)
 	}
+	if !cfg.GitListCollapsed {
+		t.Error("GitListCollapsed = false, want true")
+	}
 	if cfg.Theme != "dracula" || cfg.TreeWidth != 10 || !cfg.TreeCollapsed {
 		t.Errorf("Parse() = %+v, want the rest of the file preserved", cfg)
 	}
@@ -1048,7 +1051,7 @@ func TestSaveGitLayoutPreservesEveryOtherField(t *testing.T) {
 func TestSaveGitLayoutRejectsUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 
-	if err := SaveGitLayout(path, "triple", 0); !errors.Is(err, ErrConfigFormat) {
+	if err := SaveGitLayout(path, "triple", 0, false); !errors.Is(err, ErrConfigFormat) {
 		t.Fatalf("SaveGitLayout() error = %v, want %v", err, ErrConfigFormat)
 	}
 }
@@ -1057,7 +1060,7 @@ func TestSaveGitLayoutDoesNotOverwriteAnInvalidFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeConfigFile(t, path, `{"theme": 42}`)
 
-	if err := SaveGitLayout(path, "single", 40); err == nil {
+	if err := SaveGitLayout(path, "single", 40, false); err == nil {
 		t.Fatal("SaveGitLayout() error = nil, want an invalid file error")
 	}
 

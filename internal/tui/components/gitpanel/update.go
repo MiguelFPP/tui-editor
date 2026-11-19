@@ -175,16 +175,34 @@ func (m *Model) handleRelease() tea.Cmd {
 	return m.saveLayoutCmd()
 }
 
-// saveLayoutCmd persists both layout fields, when a save seam is wired.
+// saveLayoutCmd persists the layout fields, when a save seam is wired.
 func (m *Model) saveLayoutCmd() tea.Cmd {
 	save := m.saveLayout
 	if save == nil {
 		return nil
 	}
 
-	layout, width := m.layout, m.listWidth
+	layout, width, collapsed := m.layout, m.listWidth, m.listCollapsed
 
-	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout, width)} }
+	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout, width, collapsed)} }
+}
+
+// toggleList hides or shows the change list, leaving the preview with the whole width.
+func (m *Model) toggleList() tea.Cmd {
+	if m.layout == LayoutSingle && !m.listCollapsed {
+		return nil // there is no second column to hand the width to
+	}
+	if !m.split && !m.listCollapsed {
+		return nil // the panel is too narrow for two columns: nothing to collapse
+	}
+
+	m.listCollapsed = !m.listCollapsed
+	if m.listCollapsed {
+		m.cancelDrag()
+	}
+	m.sync()
+
+	return m.saveLayoutCmd()
 }
 
 // handleKey routes the keyboard of the open modal first, then resolves the key against the Git
@@ -265,6 +283,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.resizeList(widthStep)
 
 		return m.saveLayoutCmd()
+	case keymap.ActionGitToggleList:
+		return m.toggleList()
 	}
 
 	return nil
