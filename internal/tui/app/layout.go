@@ -12,6 +12,9 @@ import (
 // toastPrefix marks the statusbar toast, distinct from the panel error lines.
 const toastPrefix = "aviso: "
 
+// tabSeparator joins the top labels; the mouse hit-testing relies on its width.
+const tabSeparator = "│"
+
 // resize recomputes the canvas and the panel rectangles; the root owns hit-testing.
 func (m *Model) resize() {
 	width, height := m.canvas()
@@ -30,6 +33,23 @@ func (m *Model) resize() {
 	m.editorRect = image.Rect(treeW, headerRows, width, headerRows+body)
 	m.gitRect = image.Rect(0, headerRows, width, headerRows+body)
 	m.dockerRect = image.Rect(0, headerRows, width, headerRows+body)
+	m.markTabs(width)
+}
+
+// markTabs stores the rectangle of every top tab, on the row between the title and the body.
+func (m *Model) markTabs(width int) {
+	m.tabRects = [tabCount]image.Rectangle{}
+
+	column := 0
+	for tab := Tab(0); tab < tabCount; tab++ {
+		size := lipgloss.Width(tabLabels[tab])
+		if column+size > width {
+			return // the labels a narrow row cannot show are not clickable
+		}
+
+		m.tabRects[tab] = image.Rect(column, headerRows-1, column+size, headerRows)
+		column += size + lipgloss.Width(tabSeparator)
+	}
 }
 
 func (m Model) canvas() (int, int) {
@@ -101,22 +121,22 @@ func (m Model) editorBox(width, height int) string {
 }
 
 func (m Model) tabsLine(width int) string {
-	files := styles.Tab.Render(" Files ")
-	git := styles.Tab.Render(" Git ")
-	docker := styles.Tab.Render(" Docker ")
+	parts := make([]string, 0, tabCount*2-1)
 
-	switch m.tab {
-	case FilesTab:
-		files = styles.TabActive.Render(" Files ")
-	case GitTab:
-		git = styles.TabActive.Render(" Git ")
-	default:
-		docker = styles.TabActive.Render(" Docker ")
+	for tab := Tab(0); tab < tabCount; tab++ {
+		if tab > 0 {
+			parts = append(parts, styles.TabSeparator.Render(tabSeparator))
+		}
+
+		style := styles.Tab
+		if tab == m.tab {
+			style = styles.TabActive
+		}
+
+		parts = append(parts, style.Render(tabLabels[tab]))
 	}
 
-	line := files + styles.TabSeparator.Render("│") + git + styles.TabSeparator.Render("│") + docker
-
-	return padLine(line, width)
+	return padLine(strings.Join(parts, ""), width)
 }
 
 // statusLine shows the repo, the tab, the focus, the hints, the spinner and the toast.
