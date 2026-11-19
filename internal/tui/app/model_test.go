@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -195,7 +196,7 @@ func TestNewKeepsConfigAndDefaults(t *testing.T) {
 	deps := testDeps(t)
 	m := New(deps)
 
-	if m.cfg != deps.Config {
+	if !reflect.DeepEqual(m.cfg, deps.Config) {
 		t.Errorf("cfg = %+v, want %+v", m.cfg, deps.Config)
 	}
 	if m.Tab() != FilesTab || m.Focus() != FocusTree {

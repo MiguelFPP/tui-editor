@@ -1,5 +1,4 @@
-// Package config parses the command-line flags and environment defaults used
-// by the composition root.
+// Package config parses flags, environment defaults and the optional JSON file.
 package config
 
 import (
@@ -13,14 +12,18 @@ import (
 	"strings"
 )
 
-// Config is the validated runtime configuration of the TUI. ShowVersion is
-// resolved before any other field, so it may leave the rest empty.
+// Config is the validated runtime configuration of the TUI. ConfigPath and Keys
+// come from the optional JSON file; Theme may stay empty for main to apply its
+// default.
 type Config struct {
 	ShowVersion bool
 	Repo        string
 	Editor      string
 	DockerHost  string
 	DebugLog    string
+	ConfigPath  string
+	Theme       string
+	Keys        map[string][]string
 }
 
 // Usage is the help text shown when -h or --help is requested.
@@ -31,7 +34,9 @@ flags:
   --repo DIR         repository root, default: current directory
   --editor CMD       editor command, default: $EDITOR or vim
   --docker-host URL  Docker daemon endpoint, default: $DOCKER_HOST
-  --debug-log FILE   debug log file, default: disabled`
+  --debug-log FILE   debug log file, default: disabled
+  --config FILE      archivo de configuración JSON, default: $XDG_CONFIG_HOME/tui-editor/config.json
+  --theme NAME       tema de color, default: tokyonight-night`
 
 // ErrHelp reports that -h or --help was requested.
 var ErrHelp = flag.ErrHelp
@@ -41,6 +46,8 @@ var (
 	ErrRepoNotDirectory  = errors.New("--repo debe ser un directorio existente")
 	ErrEditorRequired    = errors.New("--editor no puede estar vacío")
 	ErrInvalidDockerHost = errors.New("--docker-host no es válido")
+	ErrConfigFile        = errors.New("no se pudo leer el archivo de configuración")
+	ErrConfigFormat      = errors.New("el archivo de configuración no es válido")
 )
 
 const (
@@ -73,6 +80,8 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	editor := flags.String("editor", editorDefault(getenv), "comando del editor externo")
 	dockerHost := flags.String("docker-host", strings.TrimSpace(getenv("DOCKER_HOST")), "endpoint del daemon Docker")
 	debugLog := flags.String("debug-log", "", "archivo de log de depuración")
+	configPath := flags.String("config", strings.TrimSpace(getenv("TUI_EDITOR_CONFIG")), "archivo de configuración JSON")
+	theme := flags.String("theme", strings.TrimSpace(getenv("TUI_EDITOR_THEME")), "tema de color")
 
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
@@ -99,12 +108,32 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{
+	path, explicit := resolveConfigPath(*configPath)
+	fileCfg, loaded, err := loadFile(path, explicit)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// Theme precedence: flag, then env (already folded into the flag default),
+	// then the file.
+	effectiveTheme := strings.TrimSpace(*theme)
+	if effectiveTheme == "" {
+		effectiveTheme = strings.TrimSpace(fileCfg.Theme)
+	}
+
+	cfg := Config{
 		Repo:       repoPath,
 		Editor:     editorCmd,
 		DockerHost: host,
 		DebugLog:   strings.TrimSpace(*debugLog),
-	}, nil
+		Theme:      effectiveTheme,
+		Keys:       fileCfg.keyOverrides(),
+	}
+	if loaded {
+		cfg.ConfigPath = path
+	}
+
+	return cfg, nil
 }
 
 func editorDefault(getenv func(string) string) string {
