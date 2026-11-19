@@ -10,7 +10,7 @@ import (
 func helpLines(keys keymap.Registry) []string {
 	bindings := keys.Bindings(keymap.ScopeRoot)
 
-	lines := make([]string, 0, len(bindings)+6)
+	lines := make([]string, 0, len(bindings)+8)
 	lines = append(lines, styles.HelpTitle.Render("tui-editor · atajos"))
 	lines = append(lines, "")
 
@@ -27,6 +27,8 @@ func helpLines(keys keymap.Registry) []string {
 	lines = append(lines, "docker: "+keys.Label(keymap.ActionTabDocker)+" abre la pestaña; "+
 		keys.Label(keymap.ActionDockerLogs)+" logs, "+keys.Label(keymap.ActionDockerStart)+"/"+
 		keys.Label(keymap.ActionDockerStop)+"/"+keys.Label(keymap.ActionDockerRestart)+" start/stop/restart con confirmación")
+	lines = append(lines, "layout: "+keys.Label(keymap.ActionToggleTree)+" minimiza o muestra el árbol, "+
+		keys.Label(keymap.ActionTreeShrink)+"/"+keys.Label(keymap.ActionTreeGrow)+" lo redimensionan")
 
 	return lines
 }

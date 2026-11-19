@@ -34,6 +34,9 @@ const (
 	treePercent  = 35
 	minEditorBox = 20
 
+	// treeStep is the cells one keyboard resize moves the shared border.
+	treeStep = 2
+
 	toastTTL = 3 * time.Second
 
 	// dirtyDraft is the notice shown when an action would drop an unsaved draft.
@@ -376,6 +379,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.setTab(DockerTab), false
 	case keymap.ActionToggleTree:
 		return m.toggleTree(), false
+	case keymap.ActionTreeShrink:
+		return m.resizeTree(-treeStep), false
+	case keymap.ActionTreeGrow:
+		return m.resizeTree(treeStep), false
 	case keymap.ActionFocusNext, keymap.ActionFocusPrev:
 		// Outside the Files tab the key belongs to the panel, which uses it for its own sections.
 		if m.tab == FilesTab {
@@ -675,6 +682,33 @@ func (m *Model) toggleTree() tea.Cmd {
 	width, collapsed := m.treeWidth, m.treeCollapsed
 
 	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
+}
+
+// resizeTree moves the shared border by delta cells, clamped like the drag, and persists it once.
+func (m *Model) resizeTree(delta int) tea.Cmd {
+	// A hidden tree has no border to move, and the other tabs have no tree at all.
+	if m.tab != FilesTab || m.treeCollapsed {
+		return nil
+	}
+
+	width, _ := m.canvas()
+	current := m.treeWidthNow(width)
+	next := clamp(current+delta, minTree, max(width-minEditorBox, minTree))
+	if next == current {
+		return nil
+	}
+
+	m.treeWidth = next
+	m.resize()
+
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	persisted, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(persisted, collapsed)} }
 }
 
 // canSplit reports whether the Files tab shows a draggable splitter: a tree beside the editor.
