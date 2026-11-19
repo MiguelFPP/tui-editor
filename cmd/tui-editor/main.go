@@ -211,10 +211,18 @@ func printConfig(w io.Writer, cfg config.Config) error {
 	}
 
 	out := struct {
-		ConfigPath string              `json:"config_path"`
-		Theme      string              `json:"theme"`
-		Keys       map[string][]string `json:"keys"`
-	}{ConfigPath: cfg.ConfigPath, Theme: name, Keys: keys}
+		ConfigPath    string              `json:"config_path"`
+		Theme         string              `json:"theme"`
+		TreeWidth     int                 `json:"tree_width"`
+		TreeCollapsed bool                `json:"tree_collapsed"`
+		Keys          map[string][]string `json:"keys"`
+	}{
+		ConfigPath:    cfg.ConfigPath,
+		Theme:         name,
+		TreeWidth:     cfg.TreeWidth,
+		TreeCollapsed: cfg.TreeCollapsed,
+		Keys:          keys,
+	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

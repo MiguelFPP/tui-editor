@@ -13,24 +13,29 @@ import (
 )
 
 // Config is the validated runtime configuration of the TUI. ConfigPath and Keys
-// come from the optional JSON file; Theme may stay empty for main to apply its
-// default. ShowVersion, ListThemes and ListKeys ask main to print a catalog and
-// exit; InitConfig writes a template and PrintConfig dumps the resolved values,
-// so no repo, editor or Docker validation runs for them.
+// come from the optional JSON file and Theme may stay empty for main to apply
+// its default. TreeWidth and TreeCollapsed hold the persisted tree layout, while
+// SavePath carries the resolved path where it can be written even before the
+// file exists. ShowVersion, ListThemes and ListKeys ask main to print a catalog
+// and exit; InitConfig writes a template and PrintConfig dumps the resolved
+// values, so no repo, editor or Docker validation runs for them.
 type Config struct {
-	ShowVersion bool
-	ListThemes  bool
-	ListKeys    bool
-	InitConfig  bool
-	Force       bool
-	PrintConfig bool
-	Repo        string
-	Editor      string
-	DockerHost  string
-	DebugLog    string
-	ConfigPath  string
-	Theme       string
-	Keys        map[string][]string
+	ShowVersion   bool
+	ListThemes    bool
+	ListKeys      bool
+	InitConfig    bool
+	Force         bool
+	PrintConfig   bool
+	Repo          string
+	Editor        string
+	DockerHost    string
+	DebugLog      string
+	ConfigPath    string
+	Theme         string
+	Keys          map[string][]string
+	TreeWidth     int
+	TreeCollapsed bool
+	SavePath      string
 }
 
 // Usage is the help text shown when -h or --help is requested.
@@ -165,12 +170,16 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 
 // loadConfig resolves the path, reads the JSON file and applies the theme
 // precedence: flag, then env (already folded into the flag default), then the
-// file. ConfigPath is only set when a file was actually loaded.
+// file. ConfigPath is only set when a file was actually loaded, while SavePath
+// always carries the resolved path so the UI can persist the layout.
 func loadConfig(configPath, theme string) (Config, error) {
 	path, explicit := resolveConfigPath(configPath)
 	fileCfg, loaded, err := loadFile(path, explicit)
 	if err != nil {
 		return Config{}, err
+	}
+	if fileCfg.TreeWidth < 0 {
+		return Config{}, fmt.Errorf("%w: tree_width no puede ser negativo", ErrConfigFormat)
 	}
 
 	effectiveTheme := strings.TrimSpace(theme)
@@ -178,9 +187,17 @@ func loadConfig(configPath, theme string) (Config, error) {
 		effectiveTheme = strings.TrimSpace(fileCfg.Theme)
 	}
 
-	cfg := Config{Theme: effectiveTheme, Keys: fileCfg.keyOverrides()}
+	cfg := Config{
+		Theme:         effectiveTheme,
+		Keys:          fileCfg.keyOverrides(),
+		TreeWidth:     fileCfg.TreeWidth,
+		TreeCollapsed: fileCfg.TreeCollapsed,
+	}
 	if loaded {
 		cfg.ConfigPath = path
+	}
+	if path != "" {
+		cfg.SavePath = path
 	}
 
 	return cfg, nil

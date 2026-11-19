@@ -16,9 +16,12 @@ import (
 const maxConfigBytes = 1 << 20
 
 // BaseFile is the template --init-config writes: a valid document with the
-// default theme and no key overrides. It always ends with a newline.
+// default theme, an unset tree layout and no key overrides. It always ends with
+// a newline.
 const BaseFile = `{
   "theme": "tokyonight-night",
+  "tree_width": 0,
+  "tree_collapsed": false,
   "keys": {}
 }
 `
@@ -51,6 +54,40 @@ func WriteDefault(path string, force bool) error {
 	}
 
 	return writeFileAtomic(target, BaseFile, force)
+}
+
+// SaveLayout persists the tree layout, preserving the theme and the key
+// overrides of an existing file and creating the parent directories when needed.
+func SaveLayout(path string, width int, collapsed bool) error {
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return fmt.Errorf("%w: ruta vacía", ErrConfigFile)
+	}
+	if width < 0 {
+		return fmt.Errorf("%w: tree_width no puede ser negativo", ErrConfigFormat)
+	}
+
+	// A missing file yields an empty config; an unreadable or invalid one aborts
+	// the save before anything is written.
+	cfg, _, err := loadFile(target, false)
+	if err != nil {
+		return err
+	}
+
+	cfg.TreeWidth = width
+	cfg.TreeCollapsed = collapsed
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrConfigFormat, target, err)
+	}
+
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("%w: no se pudo crear %s: %w", ErrConfigFile, dir, err)
+	}
+
+	return writeFileAtomic(target, string(data)+"\n", true)
 }
 
 // writeFileAtomic writes data through a temporary file in the target directory:
@@ -99,9 +136,13 @@ func writeFileAtomic(path, data string, replace bool) error {
 }
 
 // fileConfig mirrors the JSON file; names and action IDs are validated later.
+// The layout fields are always serialized, while an empty theme or set of keys
+// is omitted.
 type fileConfig struct {
-	Theme string             `json:"theme"`
-	Keys  map[string]KeyList `json:"keys"`
+	Theme         string             `json:"theme,omitempty"`
+	TreeWidth     int                `json:"tree_width"`
+	TreeCollapsed bool               `json:"tree_collapsed"`
+	Keys          map[string]KeyList `json:"keys,omitempty"`
 }
 
 // KeyList is an action's binding: a string or a list of strings.
