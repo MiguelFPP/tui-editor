@@ -674,3 +674,35 @@ func TestGitStageAndCommitThroughTheRoot(t *testing.T) {
 		t.Errorf("Tab() = %v, want the root shortcuts back", next.Tab())
 	}
 }
+
+func TestMouseClickOnTheEditorIsRebasedOntoThePanel(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "long.txt") // enough lines for an absolute click to miss the row
+	m = update(t, m, typed('e'))
+
+	if !m.editor.CapturesInput() {
+		t.Fatal("CapturesInput() = false, want the draft")
+	}
+
+	// An absolute click on the second body row must land there, not two rows below it.
+	m = update(t, m, click(m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+
+	if got := m.Focus(); got != FocusEditor {
+		t.Errorf("Focus() = %v, want the editor", got)
+	}
+	if got := m.editor.CaretLine(); got != 1 {
+		t.Errorf("CaretLine() = %d, want row 1 of the draft", got)
+	}
+}
+
+func TestMouseWheelOnTheEditorKeepsWorkingWithoutCoordinates(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "main.go")
+	m = update(t, m, typed('e'))
+
+	m = update(t, m, wheel(tea.MouseWheelDown, m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+
+	if got := m.Focus(); got != FocusEditor {
+		t.Errorf("Focus() = %v, want the editor", got)
+	}
+}

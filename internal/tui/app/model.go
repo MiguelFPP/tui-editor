@@ -421,6 +421,19 @@ func (m Model) panelAt(x, y int) (Focus, bool) {
 	}
 }
 
+// editorMouse rebases a terminal mouse event onto the editor rect; the wheel carries no coordinates.
+func (m Model) editorMouse(msg tea.Msg) tea.Msg {
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		msg.X -= m.editorRect.Min.X
+		msg.Y -= m.editorRect.Min.Y
+
+		return msg
+	default:
+		return msg
+	}
+}
+
 func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 	switch panel {
 	case FocusTree:
@@ -433,7 +446,7 @@ func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 			return nil
 		}
 
-		next, cmd := m.editor.Update(msg)
+		next, cmd := m.editor.Update(m.editorMouse(msg))
 		m.editor = next
 
 		return cmd

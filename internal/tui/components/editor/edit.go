@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -42,6 +43,12 @@ var errNoEditor = errors.New("editor: servicio de editor no configurado")
 
 // draftHint is the confirmation shown before dropping unsaved changes.
 const draftHint = "¿descartar los cambios sin guardar? (y descarta, n cancela)"
+
+// The caret reverses its cell; the reset keeps the colour of the token around it.
+const (
+	cursorOn  = "\x1b[7m"
+	cursorOff = "\x1b[27m"
+)
 
 // handleKey drives the discard confirmation, the draft and the shortcuts of the preview.
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -84,6 +91,7 @@ func (m Model) handleDraftKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	m.area = area
 	m.dirty = m.area.Value() != m.raw
 	m.refreshDraftLines()
+	m.followDraftCursor()
 
 	return m, cmd
 }
@@ -116,6 +124,8 @@ func (m *Model) startEditing() tea.Cmd {
 	m.saveErr = nil
 	m.dirty = false
 	m.refreshDraftLines()
+	m.area.MoveToBegin() // the draft opens on the first line, not at the end of the file
+	m.followDraftCursor()
 
 	return m.area.Focus()
 }
@@ -187,21 +197,183 @@ func (m Model) draftWindow(extra int) []string {
 	total := len(lines)
 	digits := gutterDigits(total)
 	cut := lipgloss.NewStyle().MaxWidth(m.width - digits - lipgloss.Width(gutterSeparator))
-	offset := max(m.area.ScrollYOffset(), 0)
+	offset := clamp(m.draftTop, 0, max(total-rows, 0))
+	caret := m.area.Line()
 
 	window := make([]string, 0, rows)
 	for row := range rows {
 		index := offset + row
-		if index >= total {
+
+		switch {
+		case index < total && index == caret:
+			window = append(window, gutterNumber(index, digits)+cut.Render(cursorRow(lines[index], m.area.Column())))
+		case index < total:
+			window = append(window, gutterNumber(index, digits)+cut.Render(expandTabs(lines[index])))
+		case index == caret:
+			// The caret waits on the empty row a trailing newline leaves behind.
+			window = append(window, gutterBlank(digits)+cursorOn+" "+cursorOff)
+		default:
 			window = append(window, gutterBlank(digits))
+		}
+	}
+
+	return window
+}
+
+// draftHints counts the rows the discard confirmation and the last failure take.
+func (m Model) draftHints() int {
+	hints := 0
+	if m.confirmDiscard {
+		hints++
+	}
+	if m.saveErr != nil {
+		hints++
+	}
+
+	return hints
+}
+
+// draftRows is the number of draft rows the body can show.
+func (m Model) draftRows() int {
+	return max(m.bodyHeight()-m.draftHints(), 0)
+}
+
+// draftTotal is the number of lines of the draft, from the cache or the textarea.
+func (m Model) draftTotal() int {
+	if m.draftLines != nil {
+		return len(m.draftLines)
+	}
+
+	return len(strings.Split(trimFinalNewline(m.area.Value()), "\n"))
+}
+
+// gutterCells is the width of the gutter the draft window draws.
+func (m Model) gutterCells() int {
+	return gutterDigits(m.draftTotal()) + lipgloss.Width(gutterSeparator)
+}
+
+// followDraftCursor scrolls the window just enough to keep the caret inside it.
+func (m *Model) followDraftCursor() {
+	rows := m.draftRows()
+	line := m.area.Line()
+
+	if line < m.draftTop {
+		m.draftTop = line
+	}
+	if line >= m.draftTop+rows {
+		m.draftTop = line - rows + 1
+	}
+
+	m.draftTop = clamp(m.draftTop, 0, max(m.draftTotal()-rows, 0))
+}
+
+// scrollDraft moves the window of the draft without moving the caret.
+func (m *Model) scrollDraft(delta int) {
+	m.draftTop = clamp(m.draftTop+delta, 0, max(m.draftTotal()-m.draftRows(), 0))
+}
+
+// handleDraftClick moves the caret to the clicked cell, without a selection.
+func (m *Model) handleDraftClick(msg tea.MouseClickMsg) {
+	if !m.editing || msg.Button != tea.MouseLeft {
+		return
+	}
+	if msg.X < 0 || msg.X >= m.width || msg.Y < headerRows || msg.Y >= headerRows+m.bodyHeight() {
+		return // the header and the padding around the body are not clickable
+	}
+
+	column := max(msg.X-m.gutterCells(), 0)
+	row := msg.Y - headerRows - m.draftHints() + m.draftTop
+
+	// The textarea adds its own gutter and scroll inside PositionAt.
+	m.area.BeginSelection(column, row-m.area.ScrollYOffset())
+	m.area.ClearSelection()
+	m.area.SetCursorColumn(column)
+	m.followDraftCursor()
+}
+
+// cursorRow reverse-videos the cell of the caret on one draft row.
+func cursorRow(row string, column int) string {
+	text := expandTabs(row)
+
+	return insertCell(text, cellOf(text, column))
+}
+
+// cellOf is the visible cell of the given column of a styled row.
+func cellOf(row string, column int) int {
+	cell, runes := 0, 0
+
+	for index := 0; index < len(row) && runes < column; {
+		if row[index] == 0x1b {
+			index += ansiEnd(row[index:])
 
 			continue
 		}
 
-		window = append(window, gutterNumber(index, digits)+cut.Render(expandTabs(lines[index])))
+		r, size := utf8.DecodeRuneInString(row[index:])
+		cell += lipgloss.Width(string(r))
+		runes++
+		index += size
 	}
 
-	return window
+	return cell
+}
+
+// insertCell wraps the rune at the given cell in reverse video; past the end of
+// the row it draws a space, so the caret is always visible.
+func insertCell(row string, cell int) string {
+	var out strings.Builder
+
+	visible := 0
+	for index := 0; index < len(row); {
+		if row[index] == 0x1b {
+			width := ansiEnd(row[index:])
+			out.WriteString(row[index : index+width])
+			index += width
+
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(row[index:])
+		if visible == cell {
+			// Reverse video around the rune keeps the colour of its token.
+			out.WriteString(cursorOn)
+			out.WriteRune(r)
+			out.WriteString(cursorOff)
+			out.WriteString(row[index+size:])
+
+			return out.String()
+		}
+
+		out.WriteString(row[index : index+size])
+		visible += lipgloss.Width(string(r))
+		index += size
+	}
+
+	if visible <= cell {
+		out.WriteString(cursorOn + " " + cursorOff)
+	}
+
+	return out.String()
+}
+
+// ansiEnd is the length of the CSI sequence that starts at s[0].
+func ansiEnd(s string) int {
+	for i := 1; i < len(s); i++ {
+		if c := s[i]; (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return i + 1
+		}
+	}
+
+	return len(s)
+}
+
+// clamp limits value to the [low, high] range.
+func clamp(value, low, high int) int {
+	if high < low {
+		return low
+	}
+
+	return min(max(value, low), high)
 }
 
 // save writes the draft over the file, claiming the stamp of the last read.

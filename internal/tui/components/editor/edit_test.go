@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
@@ -200,8 +201,8 @@ func TestEditEntersTheDraftAndCapturesInput(t *testing.T) {
 	}
 
 	view := visible(m.View())
-	if !strings.Contains(view, "draft.txt · archivo · editando · 3 líneas") {
-		t.Errorf("View() = %q, want the editing header with the line count", view)
+	if !strings.Contains(view, "draft.txt · archivo · editando · ln 1, col 1 · 3 líneas") {
+		t.Errorf("View() = %q, want the editing header with the caret and the line count", view)
 	}
 	if !strings.Contains(view, "uno") {
 		t.Errorf("View() = %q, want the draft body", view)
@@ -257,7 +258,7 @@ func TestEditEscapeAsksBeforeDroppingTheDraft(t *testing.T) {
 	m = send(t, m, typed('e'))
 	m = send(t, m, typed('X'))
 
-	changed := draftSource + "X"
+	changed := "X" + draftSource
 
 	m, cmd := press(t, m, key(tea.KeyEscape))
 	if cmd != nil {
@@ -380,16 +381,16 @@ func TestDraftBodyKeepsTheColourWhileTyping(t *testing.T) {
 
 	m = send(t, m, typed('X'))
 
-	if len(m.draftLines) != len(before)+1 {
-		t.Fatalf("draftLines = %d lines after typing, want %d", len(m.draftLines), len(before)+1)
+	if len(m.draftLines) != len(before) {
+		t.Fatalf("draftLines = %d lines after typing, want %d", len(m.draftLines), len(before))
 	}
-	// The typed line lands at the end, so every line above it keeps its colours.
-	for i, line := range before[:len(before)-1] {
-		if m.draftLines[i] != line {
-			t.Errorf("line %d = %q after typing, want the highlight kept %q", i, m.draftLines[i], line)
+	// The typed line lands on the first line, so every line below keeps its colours.
+	for i, line := range before[1:] {
+		if m.draftLines[i+1] != line {
+			t.Errorf("line %d = %q after typing, want the highlight kept %q", i+1, m.draftLines[i+1], line)
 		}
 	}
-	if view := visible(m.View()); !strings.Contains(view, "9 │ X") {
+	if view := visible(m.View()); !strings.Contains(view, "1 │ Xpackage main") {
 		t.Errorf("View() = %q, want the typed line", view)
 	}
 }
@@ -442,33 +443,49 @@ func TestDraftBodyKeepsTheBodyHeight(t *testing.T) {
 	}
 }
 
-func TestDraftScrollsWithTheTextareaKeys(t *testing.T) {
+func TestDraftScrollsWithTheCaret(t *testing.T) {
 	m := open(t, "long.txt", 40, 8)
 	m = send(t, m, typed('e'))
 
-	// The textarea owns the scroll of the draft; the body follows its offset.
-	for range 5 {
+	rows := m.draftRows()
+	if rows == 0 {
+		t.Fatal("draftRows() = 0, want a window with room for the draft")
+	}
+	if m.draftTop != 0 {
+		t.Fatalf("draftTop = %d on the opened draft, want 0", m.draftTop)
+	}
+
+	// The window follows the caret: it only moves once the caret leaves it.
+	for range rows {
 		m = send(t, m, key(tea.KeyDown))
 	}
 
-	bottom := m.area.ScrollYOffset()
-	if bottom == 0 {
-		t.Fatal("ScrollYOffset() = 0 after moving down, want the draft scrolled")
+	if got := m.area.Line(); got != rows {
+		t.Fatalf("Line() = %d after %d downs, want %d", got, rows, rows)
 	}
-	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", bottom+1, bottom+1)) {
-		t.Errorf("View() = %q, want the row of the scroll offset %d", view, bottom)
+	if m.draftTop != 1 {
+		t.Fatalf("draftTop = %d with the caret below the window, want 1", m.draftTop)
+	}
+	if got := caretRow(m); got != rows-1 {
+		t.Errorf("the caret is on row %d, want the last row %d of the window", got, rows-1)
+	}
+	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", rows+1, rows+1)) {
+		t.Errorf("View() = %q, want the row of the caret", view)
 	}
 
-	for range m.bodyHeight() + 2 {
+	// Moving back up keeps the caret on the first row of the window and rewinds it.
+	for range rows {
 		m = send(t, m, key(tea.KeyUp))
 	}
 
-	top := m.area.ScrollYOffset()
-	if top >= bottom {
-		t.Fatalf("ScrollYOffset() = %d after moving up, want less than %d", top, bottom)
+	if got := m.area.Line(); got != 0 {
+		t.Fatalf("Line() = %d after %d ups, want 0", got, rows)
 	}
-	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", top+1, top+1)) {
-		t.Errorf("View() = %q, want the row of the scroll offset %d", view, top)
+	if m.draftTop != 0 {
+		t.Errorf("draftTop = %d with the caret on the first line, want 0", m.draftTop)
+	}
+	if view := visible(m.View()); !strings.Contains(view, "1 │ line-1") {
+		t.Errorf("View() = %q, want the first line of the draft", view)
 	}
 }
 
@@ -478,7 +495,7 @@ func TestSaveWritesTheDraftThroughThePort(t *testing.T) {
 	m = send(t, m, typed('e'))
 	m = send(t, m, typed('X'))
 
-	want := draftSource + "X"
+	want := "X" + draftSource
 
 	m, cmd := press(t, m, ctrlS)
 	if cmd == nil {
@@ -533,7 +550,7 @@ func TestSaveWritesTheDraftThroughThePort(t *testing.T) {
 	if len(m.draftLines) == 0 {
 		t.Error("draftLines is empty after the save, want the draft still rendered")
 	}
-	if view := visible(m.View()); !strings.Contains(view, "4 │ X") {
+	if view := visible(m.View()); !strings.Contains(view, "1 │ Xuno") {
 		t.Errorf("View() = %q, want the saved draft behind its gutter", view)
 	}
 	if cmd == nil {
@@ -549,7 +566,7 @@ func TestSaveWritesTheDraftThroughThePort(t *testing.T) {
 	}
 
 	m = send(t, m, key(tea.KeyEscape))
-	if view := visible(m.View()); !strings.Contains(view, "4 │ X") {
+	if view := visible(m.View()); !strings.Contains(view, "1 │ Xuno") {
 		t.Errorf("View() = %q, want the saved preview", view)
 	}
 }
@@ -588,7 +605,7 @@ func TestSaveConflictKeepsTheDraft(t *testing.T) {
 	if !m.Dirty() || m.Loading() {
 		t.Errorf("dirty/Loading() = %v/%v, want the draft kept and no pending write", m.Dirty(), m.Loading())
 	}
-	if got := m.area.Value(); got != draftSource+"X" {
+	if got := m.area.Value(); got != "X"+draftSource {
 		t.Errorf("draft = %q, want the draft kept", got)
 	}
 
@@ -753,5 +770,354 @@ func TestExternalDoneReportsTheFailureOfTheEditor(t *testing.T) {
 	m = apply(t, m, run(t, cmd))
 	if m.saveErr == nil {
 		t.Error("saveErr = nil after a failed editor, want the failure kept")
+	}
+}
+
+// draftRow returns one rendered row of the draft window, skipping the hint rows.
+func draftRow(m Model, row int) string {
+	rows := strings.Split(m.draftBody(), "\n")
+	index := row + m.draftHints()
+	if index < 0 || index >= len(rows) {
+		return ""
+	}
+
+	return rows[index]
+}
+
+// caretRow returns the row of the draft window that holds the caret, or -1.
+func caretRow(m Model) int {
+	rows := strings.Split(m.draftBody(), "\n")
+	for i, row := range rows {
+		if strings.Contains(row, cursorOn) {
+			return i - m.draftHints()
+		}
+	}
+
+	return -1
+}
+
+// caretCell returns the visible cell of the caret inside one rendered row, or -1.
+func caretCell(row string) int {
+	start := strings.Index(row, cursorOn)
+	if start < 0 {
+		return -1
+	}
+
+	return lipgloss.Width(plain(row[:start]))
+}
+
+// click builds a left click on one cell of the editor.
+func click(x, y int) tea.MouseClickMsg {
+	return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+}
+
+func TestCursorIsDrawnWithoutChangingTheText(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	body := m.draftBody()
+	if !strings.Contains(body, cursorOn) || !strings.Contains(body, cursorOff) {
+		t.Fatalf("draftBody() = %q, want the caret around a cell", body)
+	}
+
+	// The caret reverses a cell of the row: the visible text is the draft itself.
+	lines := strings.Split(trimFinalNewline(m.area.Value()), "\n")
+	rows := strings.Split(visible(m.View()), "\n")[headerRows:]
+	for i, row := range rows {
+		want := fmt.Sprintf("%*d%s%s", gutterDigits(len(lines)), i+1, gutterSeparator, expandTabs(lines[i]))
+		if row != want {
+			t.Errorf("row %d = %q, want the plain draft %q", i, row, want)
+		}
+	}
+}
+
+func TestCursorKeepsTheBodyHeight(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+	m = send(t, m, key(tea.KeyDown))
+
+	// The caret adds no row: the draft still fills the body exactly.
+	if got, want := len(bodyRows(m)), m.bodyHeight(); got != want {
+		t.Fatalf("the draft with its caret renders %d rows, want %d", got, want)
+	}
+	if !strings.Contains(m.draftBody(), cursorOn) {
+		t.Error("draftBody() holds no caret, want the caret drawn")
+	}
+}
+
+func TestCursorOnAnEmptyDraft(t *testing.T) {
+	m := open(t, "empty.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	if !m.editing {
+		t.Fatal("editing = false, want the draft of an empty file")
+	}
+	if got := caretRow(m); got != 0 {
+		t.Errorf("the caret is on row %d, want 0", got)
+	}
+	if got, want := caretCell(draftRow(m, 0)), m.gutterCells(); got != want {
+		t.Errorf("the caret is on cell %d of the row, want %d", got, want)
+	}
+	if got, want := len(bodyRows(m)), m.bodyHeight(); got != want {
+		t.Errorf("the empty draft renders %d rows, want %d", got, want)
+	}
+}
+
+func TestCursorOnTheEmptyLineOfTheDraft(t *testing.T) {
+	fx := newDraft()
+	m := fx.open(t)
+	m = send(t, m, typed('e'))
+
+	// The trailing newline of "uno\ndos\ntres\n" leaves an empty last line.
+	for range m.draftLines {
+		m = send(t, m, key(tea.KeyDown))
+	}
+
+	if got, want := m.area.Line(), len(m.draftLines); got != want {
+		t.Fatalf("Line() = %d at the end of the draft, want %d", got, want)
+	}
+	if got, want := caretRow(m), len(m.draftLines)-m.draftTop; got != want {
+		t.Errorf("the caret is on row %d, want %d", got, want)
+	}
+}
+
+func TestCursorMovesWithTheArrowKeys(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	// The draft opens on the first line, with the caret on its first cell.
+	if got := m.area.Line(); got != 0 {
+		t.Fatalf("Line() = %d on the opened draft, want 0", got)
+	}
+	if got := m.area.Column(); got != 0 {
+		t.Fatalf("Column() = %d on the opened draft, want 0", got)
+	}
+	if got := caretRow(m); got != 0 {
+		t.Fatalf("the caret is on row %d, want 0", got)
+	}
+	if got, want := caretCell(draftRow(m, 0)), m.gutterCells(); got != want {
+		t.Fatalf("the caret is on cell %d of the row, want %d", got, want)
+	}
+
+	m = send(t, m, key(tea.KeyRight))
+	m = send(t, m, key(tea.KeyRight))
+	if got := m.area.Column(); got != 2 {
+		t.Fatalf("Column() = %d after two rights, want 2", got)
+	}
+	if got, want := caretCell(draftRow(m, 0)), m.gutterCells()+2; got != want {
+		t.Errorf("the caret is on cell %d, want %d", got, want)
+	}
+
+	m = send(t, m, key(tea.KeyDown))
+	if got := m.area.Line(); got != 1 {
+		t.Fatalf("Line() = %d after down, want 1", got)
+	}
+	if got := m.area.Column(); got != 2 {
+		t.Fatalf("Column() = %d after down, want the column kept", got)
+	}
+	if got := caretRow(m); got != 1 {
+		t.Errorf("the caret is on row %d after down, want 1", got)
+	}
+
+	m = send(t, m, key(tea.KeyLeft))
+	if got := m.area.Column(); got != 1 {
+		t.Errorf("Column() = %d after left, want 1", got)
+	}
+	if got, want := caretCell(draftRow(m, 1)), m.gutterCells()+1; got != want {
+		t.Errorf("the caret is on cell %d, want %d", got, want)
+	}
+	if got := caretRow(m); got != 1 {
+		t.Errorf("the caret is on row %d after left, want 1", got)
+	}
+}
+
+func TestCursorFollowsTheClick(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	m, cmd := press(t, m, click(m.gutterCells()+3, headerRows+2))
+	if cmd != nil {
+		t.Errorf("the click produced a command, want nil")
+	}
+	if got := m.area.Line(); got != 2 {
+		t.Fatalf("Line() = %d after the click, want 2", got)
+	}
+	if got := m.area.Column(); got != 3 {
+		t.Fatalf("Column() = %d after the click, want 3", got)
+	}
+	if m.area.HasSelection() {
+		t.Error("the click left a selection, want a bare caret")
+	}
+	if got := caretRow(m); got != 2 {
+		t.Errorf("the caret is on row %d, want 2", got)
+	}
+	if got, want := caretCell(draftRow(m, 2)), m.gutterCells()+3; got != want {
+		t.Errorf("the caret is on cell %d, want %d", got, want)
+	}
+}
+
+func TestCursorClickOnTheGutterUsesTheFirstColumn(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	for x := range m.gutterCells() {
+		m, _ = press(t, m, click(x, headerRows+2))
+		if got := m.area.Column(); got != 0 {
+			t.Fatalf("Column() = %d after a click on cell %d of the gutter, want 0", got, x)
+		}
+		if got := m.area.Line(); got != 2 {
+			t.Fatalf("Line() = %d after a click on the gutter, want 2", got)
+		}
+	}
+}
+
+func TestCursorFollowsTheClickAfterScrolling(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	for range m.draftRows() {
+		m = send(t, m, key(tea.KeyDown))
+	}
+
+	// The wheel moves our window on its own; the textarea keeps its own scroll.
+	top := m.draftTop
+	m, _ = press(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 2, Y: 3})
+	if m.draftTop != top+wheelStep {
+		t.Fatalf("draftTop = %d after the wheel, want %d", m.draftTop, top+wheelStep)
+	}
+
+	m, _ = press(t, m, click(m.gutterCells()+1, headerRows+3))
+	if got, want := m.area.Line(), m.draftTop+3; got != want {
+		t.Errorf("Line() = %d after the click, want %d", got, want)
+	}
+	if got := m.area.Column(); got != 1 {
+		t.Errorf("Column() = %d after the click, want 1", got)
+	}
+	if got := caretRow(m); got != 3 {
+		t.Errorf("the caret is on row %d of the window, want 3", got)
+	}
+}
+
+func TestCursorIgnoresClicksOutsideTheBody(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+	m = send(t, m, key(tea.KeyDown))
+	m = send(t, m, key(tea.KeyDown))
+
+	line, column := m.area.Line(), m.area.Column()
+
+	cases := []struct {
+		name string
+		x, y int
+	}{
+		{name: "cabecera", x: 4, y: 0},
+		{name: "bajo el cuerpo", x: 4, y: headerRows + m.bodyHeight()},
+		{name: "a la derecha", x: m.width, y: headerRows + 1},
+		{name: "a la izquierda", x: -1, y: headerRows + 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next, cmd := press(t, m, click(tc.x, tc.y))
+			if cmd != nil {
+				t.Errorf("the click produced a command, want nil")
+			}
+			if next.area.Line() != line || next.area.Column() != column {
+				t.Errorf("the caret is at %d:%d after a click on %s, want %d:%d",
+					next.area.Line(), next.area.Column(), tc.name, line, column)
+			}
+			if next.draftTop != m.draftTop {
+				t.Errorf("draftTop = %d after a click on %s, want %d", next.draftTop, tc.name, m.draftTop)
+			}
+		})
+	}
+}
+
+func TestCursorIgnoresClicksInThePreview(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+
+	next, cmd := press(t, m, click(m.gutterCells()+1, headerRows+1))
+	if cmd != nil {
+		t.Errorf("the click produced a command, want nil")
+	}
+	if next.editing || next.draftTop != 0 {
+		t.Errorf("editing/draftTop = %v/%d after a click in the preview, want false/0", next.editing, next.draftTop)
+	}
+}
+
+func TestDraftWheelScrollsTheWindowWithoutMovingTheCaret(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+	m = send(t, m, typed('e'))
+
+	m, cmd := press(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 2, Y: 3})
+	if cmd != nil {
+		t.Errorf("the wheel produced a command, want nil")
+	}
+	if m.draftTop != wheelStep {
+		t.Fatalf("draftTop = %d after the wheel down, want %d", m.draftTop, wheelStep)
+	}
+	if got := m.area.Line(); got != 0 {
+		t.Errorf("Line() = %d after the wheel down, want the caret kept at 0", got)
+	}
+	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", wheelStep+1, wheelStep+1)) {
+		t.Errorf("View() = %q, want the window scrolled to line %d", view, wheelStep+1)
+	}
+
+	m, _ = press(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 2, Y: 3})
+	if m.draftTop != 0 {
+		t.Fatalf("draftTop = %d after the wheel up, want 0", m.draftTop)
+	}
+	if view := visible(m.View()); !strings.Contains(view, " 1 │ line-1") {
+		t.Errorf("View() = %q, want the first line of the draft back", view)
+	}
+
+	// The wheel never leaves the draft: the window stops at both ends.
+	m, _ = press(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 2, Y: 3})
+	if m.draftTop != 0 {
+		t.Errorf("draftTop = %d after scrolling above the first line, want 0", m.draftTop)
+	}
+	for range 20 {
+		m, _ = press(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 2, Y: 3})
+	}
+	if got, want := m.draftTop, len(m.draftLines)-m.draftRows(); got != want {
+		t.Errorf("draftTop = %d after scrolling to the last line, want %d", got, want)
+	}
+	if got := m.area.Line(); got != 0 {
+		t.Errorf("Line() = %d after scrolling to the last line, want the caret kept at 0", got)
+	}
+}
+
+func TestDraftWheelIsIgnoredOutsideEditing(t *testing.T) {
+	m := open(t, "long.txt", 40, 6)
+
+	m = scroll(t, m, tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 2, Y: 3})
+	if got := m.viewport.YOffset(); got != wheelStep {
+		t.Errorf("viewport.YOffset() = %d in the preview, want %d", got, wheelStep)
+	}
+	if m.draftTop != 0 {
+		t.Errorf("draftTop = %d in the preview, want 0", m.draftTop)
+	}
+}
+
+func TestDraftHeaderShowsTheCaretPosition(t *testing.T) {
+	m := open(t, "long.txt", 80, 6)
+
+	if header := plain(m.header()); strings.Contains(header, "ln ") {
+		t.Fatalf("header = %q in the preview, want no caret position", header)
+	}
+
+	m = send(t, m, typed('e'))
+	if header := plain(m.header()); !strings.Contains(header, "editando · ln 1, col 1") {
+		t.Errorf("header = %q, want the caret right after editando", header)
+	}
+
+	m = send(t, m, key(tea.KeyDown))
+	if header := plain(m.header()); !strings.Contains(header, "ln 2, col 1") {
+		t.Errorf("header = %q, want the line of the caret", header)
+	}
+
+	m = send(t, m, key(tea.KeyRight))
+	if header := plain(m.header()); !strings.Contains(header, "ln 2, col 2") {
+		t.Errorf("header = %q, want the column of the caret", header)
 	}
 }
