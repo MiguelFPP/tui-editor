@@ -66,23 +66,38 @@ func Highlight(path domain.RelPath, source string) string {
 // HighlightLines colours source by the lexer of path and returns its lines; it falls back to the
 // plain lines when no lexer applies or when the lexer changes the line count.
 func HighlightLines(path domain.RelPath, source string) []string {
-	trimmed := strings.TrimSuffix(source, "\n")
+	lines, _ := colouredLines(path, strings.TrimSuffix(source, "\n"))
+
+	return lines
+}
+
+// HighlightFile colours the whole file once and returns its lines; ok is false when no lexer applies.
+func HighlightFile(path domain.RelPath, source string) ([]string, bool) {
+	if source == "" {
+		return []string{""}, false
+	}
+
+	return colouredLines(path, strings.TrimSuffix(source, "\n"))
+}
+
+// colouredLines colours trimmed and reports whether the result kept its line count.
+func colouredLines(path domain.RelPath, trimmed string) ([]string, bool) {
 	plain := strings.Split(trimmed, "\n")
 	if trimmed == "" {
-		return plain // one empty row, so the gutter always numbers a line
+		return plain, false // one empty row, so the gutter always numbers a line
 	}
 
 	highlighted, ok := colourise(path, trimmed)
 	if !ok {
-		return plain
+		return plain, false
 	}
 
 	lines := strings.Split(strings.TrimSuffix(highlighted, "\n"), "\n")
 	if len(lines) != len(plain) {
-		return plain // a lexer that rewrites the line count is not usable here
+		return plain, false // a lexer that rewrites the line count is not usable here
 	}
 
-	return lines
+	return lines, true
 }
 
 // HighlightDiffLines colours the body of a unified diff line by line, keeping the gutter and the

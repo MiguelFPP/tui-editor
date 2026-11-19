@@ -580,10 +580,27 @@ func (m Model) splitDiffWanted() bool {
 // renderPreview draws the diff with the widest layout the preview can hold.
 func (m Model) renderPreview() string {
 	if m.splitDiffWanted() {
-		return common.RenderDiffSplit(m.diff, m.previewWidth(), true)
+		return common.RenderDiffSplitSides(m.diff, m.previewWidth(), true, m.diffSides())
 	}
 
 	return common.RenderDiff(m.diff, m.previewWidth(), true)
+}
+
+// diffSides returns the exact content of both sides when it belongs to the loaded diff.
+func (m Model) diffSides() common.DiffSides {
+	if !m.sides.oldOK && !m.sides.newOK {
+		return common.DiffSides{}
+	}
+	if !m.sidesMatchesDiff() {
+		return common.DiffSides{}
+	}
+
+	return common.DiffSides{Old: m.sides.old, New: m.sides.new}
+}
+
+// sidesMatchesDiff reports whether the loaded sides were read for the current diff.
+func (m Model) sidesMatchesDiff() bool {
+	return m.loaded && m.sides.path == m.diff.Path && m.sides.staged == m.diff.Staged
 }
 
 // previewSpans locates every hunk inside the rendered preview, so the hunk cursor and the clicks
@@ -634,10 +651,13 @@ func alignedSpans(diff domain.Diff) []rowSpan {
 	return spans
 }
 
-// highlightKeyFor identifies the cached preview: the path, the mode, the layout and the width decide
-// the lexer and the row count.
+// highlightKeyFor identifies the cached preview; the exact mode enters the key, so a late sides
+// answer invalidates the cache. The sides counter covers the cases where both sides failed.
 func (m Model) highlightKeyFor() string {
-	return fmt.Sprintf("%s|%t|%t|%d", m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth())
+	exact := m.sidesMatchesDiff() && (m.sides.oldOK || m.sides.newOK)
+
+	return fmt.Sprintf("%s|%t|%t|%d|%t|%d",
+		m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth(), exact, m.seqs.sides)
 }
 
 // highlightedPreview colours the body of the diff once per key; a repeated render reuses it. The

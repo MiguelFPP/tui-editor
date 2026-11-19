@@ -19,10 +19,21 @@ const (
 	numberGap     = " "
 )
 
-// RenderDiffSplit renders d side by side: the old side on the left and the new one on the right,
-// with the hunk titles and the change markers of each side. Each column is highlighted on its own,
-// so the lexer sees the old lines together and the new ones together.
+// RenderDiffSplit renders d side by side with each column highlighted on its own.
 func RenderDiffSplit(d domain.Diff, width int, color bool) string {
+	return RenderDiffSplitSides(d, width, color, DiffSides{})
+}
+
+// DiffSides is the real text of both sides of a diff; nil means the side has none.
+type DiffSides struct {
+	Old string
+	New string
+}
+
+// RenderDiffSplitSides renders the aligned diff coloured from the real file content: every cell takes
+// the line its number names, so a lexer that spans several lines stays right; a side without usable
+// content keeps the per-column highlighting.
+func RenderDiffSplitSides(d domain.Diff, width int, color bool, sides DiffSides) string {
 	switch {
 	case d.Binary:
 		return RenderDiff(d, width, color)
@@ -30,16 +41,24 @@ func RenderDiffSplit(d domain.Diff, width int, color bool) string {
 		return RenderDiff(d, width, color)
 	}
 
-	aligned := domain.AlignDiff(d)
+	lines := renderAlignedHunks(d.Path, domain.AlignDiff(d), width, color, exactSides(d, color, sides))
+	if d.Truncated {
+		lines = append(lines, styled(styles.MetaPlain, fit("diff truncado", width), color))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// renderAlignedHunks renders every aligned hunk with the text of each cell already resolved.
+func renderAlignedHunks(path domain.RelPath, aligned []domain.AlignedHunk, width int, color bool, exact alignedSides) []string {
 	lines := make([]string, 0, len(aligned)*8)
 
 	for _, hunk := range aligned {
-		title := styled(styles.DiffHeader, fit(hunkTitle(hunk.Hunk), width), color)
-		lines = append(lines, title)
+		lines = append(lines, styled(styles.DiffHeader, fit(hunkTitle(hunk.Hunk), width), color))
 
 		oldWidth, newWidth := splitNumberWidths(hunk.Rows)
 		sideWidth := splitSideWidth(width)
-		oldText, newText := highlightSides(d.Path, hunk.Rows, splitSideTextWidth(sideWidth, oldWidth, newWidth), color)
+		oldText, newText := hunkTexts(path, hunk.Rows, splitSideTextWidth(sideWidth, oldWidth, newWidth), color, exact)
 
 		for index, row := range hunk.Rows {
 			lines = append(lines,
@@ -48,32 +67,98 @@ func RenderDiffSplit(d domain.Diff, width int, color bool) string {
 		}
 	}
 
-	if d.Truncated {
-		lines = append(lines, styled(styles.MetaPlain, fit("diff truncado", width), color))
-	}
-
-	return strings.Join(lines, "\n")
+	return lines
 }
 
-// highlightSides colours each column of a hunk in its own pass; an unusable result falls back to the
-// plain texts. The text is clipped first, so the escapes are never cut in half.
-func highlightSides(path domain.RelPath, rows []domain.SplitRow, width int, color bool) ([]string, []string) {
-	oldText := make([]string, len(rows))
-	newText := make([]string, len(rows))
+// alignedSides is the coloured whole file of each side; ok enables the mapping by line number.
+type alignedSides struct {
+	old   []string
+	new   []string
+	oldOK bool
+	newOK bool
+}
+
+// exactSides colours both sides of the whole file once, when each one has a lexer.
+func exactSides(d domain.Diff, color bool, sides DiffSides) alignedSides {
+	if !color {
+		return alignedSides{}
+	}
+
+	oldPath := d.OrigPath
+	if oldPath.IsZero() {
+		oldPath = d.Path
+	}
+
+	exact := alignedSides{}
+	if sides.Old != "" {
+		exact.old, exact.oldOK = HighlightFile(oldPath, sides.Old)
+	}
+	if sides.New != "" {
+		exact.new, exact.newOK = HighlightFile(d.Path, sides.New)
+	}
+
+	return exact
+}
+
+// hunkTexts resolves both columns of a hunk; the fallback stays per side.
+func hunkTexts(path domain.RelPath, rows []domain.SplitRow, width int, color bool, exact alignedSides) ([]string, []string) {
+	if !exact.oldOK && !exact.newOK {
+		return highlightSides(path, rows, width, color)
+	}
+
+	return sideTexts(path, rows, true, width, color, exact),
+		sideTexts(path, rows, false, width, color, exact)
+}
+
+// sideTexts resolves one column: the whole-file line its number names, or the clipped fallback.
+func sideTexts(path domain.RelPath, rows []domain.SplitRow, old bool, width int, color bool, exact alignedSides) []string {
+	file, ok := exact.old, exact.oldOK
+	if !old {
+		file, ok = exact.new, exact.newOK
+	}
+
+	texts := make([]string, len(rows))
+	if ok {
+		for index, row := range rows {
+			texts[index] = exactText(file, sideCell(row, old).Number)
+		}
+
+		return texts
+	}
 
 	for index, row := range rows {
-		oldText[index] = clipSide(row.Old, width)
-		newText[index] = clipSide(row.New, width)
+		texts[index] = clipSide(sideCell(row, old), width)
 	}
-
 	if !color {
-		return oldText, newText
+		return texts
 	}
 
-	highlightedOld := HighlightLines(path, strings.Join(nonEmpty(oldText), "\n"))
-	highlightedNew := HighlightLines(path, strings.Join(nonEmpty(newText), "\n"))
+	return mergeHighlighted(texts, HighlightLines(path, strings.Join(nonEmpty(texts), "\n")))
+}
 
-	return mergeHighlighted(oldText, highlightedOld), mergeHighlighted(newText, highlightedNew)
+// sideCell picks one side of an aligned row.
+func sideCell(row domain.SplitRow, old bool) domain.SplitCell {
+	if old {
+		return row.Old
+	}
+
+	return row.New
+}
+
+// exactText returns the line a 1-based number names, or "" when it is out of range.
+func exactText(lines []string, number int) string {
+	if number <= 0 || number > len(lines) {
+		return ""
+	}
+
+	return lines[number-1]
+}
+
+// highlightSides colours each column of a hunk in its own pass; the text is clipped first, so the
+// escapes are never cut in half.
+func highlightSides(path domain.RelPath, rows []domain.SplitRow, width int, color bool) ([]string, []string) {
+	return sideTexts(path, rows, true, width, color, alignedSides{}),
+		sideTexts(path, rows, false, width, color, alignedSides{})
 }
 
 // clipSide keeps the visible text of one side inside the cells it has.
