@@ -81,6 +81,8 @@ const (
 	listHeaderRows = 1
 	// widthStep is the cells one keyboard resize moves the shared border.
 	widthStep = 2
+	// minSplitDiffWidth is the preview width below which the diff stays unified.
+	minSplitDiffWidth = 52
 )
 
 // Section is one navigable block of the panel.
@@ -500,18 +502,20 @@ func (m *Model) SetBounds(x, y, width, height int) {
 // sync rebuilds the cached diff body, the column geometry and the hit-test rectangles; View only
 // composes them.
 func (m *Model) sync() {
+	// The geometry decides the preview width, so it is computed before the diff is rendered.
+	m.split = m.splitNow()
+	m.listW, m.previewW = m.splitWidths(m.width)
+
 	if !m.loaded {
 		m.diffBody, m.diffLines, m.hunkRows = "", nil, nil
 		m.highlighted, m.highlightKey = nil, ""
 	} else {
-		m.diffBody = common.RenderDiff(m.diff, m.width, true)
+		m.diffBody = m.renderPreview()
 		m.diffLines = strings.Split(m.diffBody, "\n")
-		m.hunkRows = diffSpans(m.diff)
+		m.hunkRows = m.previewSpans()
 		m.highlighted, m.highlightKey = m.highlightedPreview(), m.highlightKeyFor()
 	}
 
-	m.split = m.splitNow()
-	m.listW, m.previewW = m.splitWidths(m.width)
 	m.markColumns()
 
 	// Both column offsets survive a resize, clamped to the rows they now have.
@@ -519,6 +523,59 @@ func (m *Model) sync() {
 	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.collapsedRows()), m.previewViewportHeight())
 
 	m.clamp(m.section)
+}
+
+// previewWidth is the cells the diff preview has, its frame excluded.
+func (m Model) previewWidth() int {
+	if !m.split {
+		return m.width
+	}
+
+	return innerCells(m.previewW)
+}
+
+// splitDiffWanted reports whether the preview is wide enough for the aligned diff. It only applies
+// to the two-column layout: a single column keeps the unified render.
+func (m Model) splitDiffWanted() bool {
+	return m.split && m.previewWidth() >= minSplitDiffWidth
+}
+
+// renderPreview draws the diff with the widest layout the preview can hold.
+func (m Model) renderPreview() string {
+	if m.splitDiffWanted() {
+		return common.RenderDiffSplit(m.diff, m.previewWidth(), true)
+	}
+
+	return common.RenderDiff(m.diff, m.previewWidth(), true)
+}
+
+// previewSpans locates every hunk inside the rendered preview, so the hunk cursor and the clicks
+// follow the layout that was actually drawn.
+func (m Model) previewSpans() []rowSpan {
+	if m.splitDiffWanted() {
+		return alignedSpans(m.diff)
+	}
+
+	return diffSpans(m.diff)
+}
+
+// alignedSpans is diffSpans for the side-by-side layout: each hunk is its title plus its aligned
+// rows, which can differ from the number of raw lines.
+func alignedSpans(diff domain.Diff) []rowSpan {
+	if diff.IsEmpty() || diff.Binary {
+		return nil
+	}
+
+	spans := make([]rowSpan, 0, len(diff.Hunks))
+	row := 1 // the first row of the section names the diff
+
+	for _, hunk := range domain.AlignDiff(diff) {
+		rows := len(hunk.Rows) + 1
+		spans = append(spans, rowSpan{start: row, end: row + rows})
+		row += rows
+	}
+
+	return spans
 }
 
 // highlightKeyFor identifies the cached preview: the path, the mode and the width decide the lexer.

@@ -19,6 +19,131 @@ const (
 	numberGap     = " "
 )
 
+// RenderDiffSplit renders d side by side: the old side on the left and the new one on the right,
+// with the hunk titles and the change markers of each side.
+func RenderDiffSplit(d domain.Diff, width int, color bool) string {
+	switch {
+	case d.Binary:
+		return RenderDiff(d, width, color)
+	case d.IsEmpty():
+		return RenderDiff(d, width, color)
+	}
+
+	aligned := domain.AlignDiff(d)
+	lines := make([]string, 0, len(aligned)*8)
+
+	for _, hunk := range aligned {
+		title := styled(styles.DiffHeader, fit(hunkTitle(hunk.Hunk), width), color)
+		lines = append(lines, title)
+
+		oldWidth, newWidth := splitNumberWidths(hunk.Rows)
+		sideWidth := splitSideWidth(width)
+
+		for _, row := range hunk.Rows {
+			lines = append(lines,
+				splitCell(row.Old, oldWidth, sideWidth, color)+splitSeparator+
+					splitCell(row.New, newWidth, sideWidth, color))
+		}
+	}
+
+	if d.Truncated {
+		lines = append(lines, styled(styles.MetaPlain, fit("diff truncado", width), color))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// splitSeparator divides the two sides of the aligned diff.
+const splitSeparator = " │ "
+
+// splitSideWidth is the cells each side gets; the separator and the numbers are not counted here.
+func splitSideWidth(width int) int {
+	if width <= 0 {
+		return 0
+	}
+
+	return max((width-len([]rune(splitSeparator)))/2, 0)
+}
+
+// splitCell renders one side of an aligned row: its number, its marker and its text.
+func splitCell(cell domain.SplitCell, numberWidth, width int, color bool) string {
+	if !cell.Filled {
+		return padLine("", width)
+	}
+
+	number := ""
+	if cell.Number > 0 {
+		number = fmt.Sprintf("%*d", numberWidth, cell.Number)
+	}
+
+	prefix := fmt.Sprintf("%s%s%s", number, numberGap, splitMarker(cell.Kind))
+	body := cell.Text
+	if cell.Kind == domain.NoNewline {
+		body = noNewlineText
+	}
+
+	if width > 0 {
+		body = truncate(body, max(width-lipgloss.Width(prefix), 0))
+	}
+
+	if !color {
+		return padLine(prefix+body, width)
+	}
+
+	return styles.Gutter.Render(prefix) + styled(splitLineStyle(cell.Kind), body, color)
+}
+
+// splitMarker is the diff prefix of one side.
+func splitMarker(kind domain.DiffLineKind) string {
+	switch kind {
+	case domain.Removed:
+		return "-"
+	case domain.Added:
+		return "+"
+	case domain.NoNewline:
+		return numberGap
+	default:
+		return numberGap
+	}
+}
+
+// splitLineStyle colours one side by the kind of its line.
+func splitLineStyle(kind domain.DiffLineKind) lipgloss.Style {
+	switch kind {
+	case domain.Removed:
+		return styles.Removed
+	case domain.Added:
+		return styles.Added
+	case domain.NoNewline:
+		return styles.MetaPlain
+	default:
+		return styles.PlainCells(lipgloss.NewStyle())
+	}
+}
+
+// splitNumberWidths sizes both numbers from the aligned rows.
+func splitNumberWidths(rows []domain.SplitRow) (int, int) {
+	oldMax, newMax := 0, 0
+	for _, row := range rows {
+		oldMax = max(oldMax, row.Old.Number)
+		newMax = max(newMax, row.New.Number)
+	}
+
+	return len(strconv.Itoa(max(oldMax, 1))), len(strconv.Itoa(max(newMax, 1)))
+}
+
+// padLine fills text up to width cells.
+func padLine(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	if gap := width - lipgloss.Width(text); gap > 0 {
+		return text + strings.Repeat(" ", gap)
+	}
+
+	return text
+}
+
 // RenderDiff renders d as a unified diff; color=false returns plain, stable text.
 func RenderDiff(d domain.Diff, width int, color bool) string {
 	switch {

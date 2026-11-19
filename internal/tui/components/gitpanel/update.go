@@ -79,6 +79,13 @@ func (m *Model) handleWheel(ev tea.Mouse) {
 		return
 	}
 
+	// A solo column scrolls the section, or the preview when the list is collapsed.
+	if m.listCollapsed {
+		m.scrollPreviewBy(delta)
+
+		return
+	}
+
 	m.offsets[m.section] += delta
 	rows := len(m.rows(m.section))
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
