@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -659,6 +660,97 @@ func TestLexerForMatchesPathThenContent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHighlightLinesKeepsTheLines(t *testing.T) {
+	lines := HighlightLines("main.go", goSource)
+	want := strings.Split(strings.TrimSuffix(goSource, "\n"), "\n")
+
+	if len(lines) != len(want) {
+		t.Fatalf("HighlightLines() = %d lines, want %d", len(lines), len(want))
+	}
+
+	coloured := 0
+	for i, line := range lines {
+		if got := plain(line); got != want[i] {
+			t.Errorf("line %d = %q, want %q", i, got, want[i])
+		}
+		if strings.Contains(line, "\x1b[") {
+			coloured++
+		}
+	}
+	if coloured == 0 {
+		t.Error("HighlightLines() returned no ANSI escapes, want the Go keywords coloured")
+	}
+
+	trimmed := HighlightLines("main.go", strings.TrimSuffix(goSource, "\n"))
+	if len(trimmed) != len(lines) {
+		t.Fatalf("HighlightLines() = %d lines without the trailing newline, want %d", len(trimmed), len(lines))
+	}
+	for i, line := range lines {
+		if trimmed[i] != line {
+			t.Errorf("line %d = %q without the trailing newline, want %q", i, trimmed[i], line)
+		}
+	}
+}
+
+func TestHighlightLinesFallsBackToPlainText(t *testing.T) {
+	lines := HighlightLines("notes.xyz", unknownSource)
+	want := strings.Split(strings.TrimSuffix(unknownSource, "\n"), "\n")
+
+	if len(lines) != len(want) {
+		t.Fatalf("HighlightLines() = %d lines, want %d", len(lines), len(want))
+	}
+	for i, line := range lines {
+		if line != want[i] {
+			t.Errorf("line %d = %q, want the plain %q", i, line, want[i])
+		}
+	}
+
+	empty := HighlightLines("notes.xyz", "")
+	if len(empty) != 1 || empty[0] != "" {
+		t.Errorf("HighlightLines() = %q for an empty source, want one empty line", empty)
+	}
+}
+
+func TestLexerForCachesByName(t *testing.T) {
+	first := lexerFor("main.go", goSource)
+	if first == nil {
+		t.Fatal("lexerFor() = nil, want the Go lexer")
+	}
+
+	// The cached name wins over a content analysis that would pick Markdown.
+	second := lexerFor("docs/main.go", markdownSource)
+	if second == nil {
+		t.Fatal("lexerFor() = nil on the cached name, want the Go lexer")
+	}
+	if got := second.Config().Name; got != "Go" {
+		t.Errorf("lexerFor() = %q, want the cached %q", got, "Go")
+	}
+	if _, err := second.Tokenise(nil, goSource); err != nil {
+		t.Errorf("Tokenise() = %v, want the cached lexer usable", err)
+	}
+}
+
+func TestLexerCacheIsSafeForConcurrentRendering(t *testing.T) {
+	paths := []domain.RelPath{"main.go", "docs/guide.md", "Makefile", "snippet", "notes.xyz"}
+
+	var group sync.WaitGroup
+	for _, path := range paths {
+		group.Add(1)
+
+		go func() {
+			defer group.Done()
+
+			for range 4 {
+				if lines := HighlightLines(path, goSource); len(lines) == 0 {
+					t.Error("HighlightLines() = nil, want the lines of the source")
+				}
+			}
+		}()
+	}
+
+	group.Wait()
 }
 
 func TestLoadingAndErrReportTheReadState(t *testing.T) {

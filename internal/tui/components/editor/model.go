@@ -74,6 +74,8 @@ type Model struct {
 
 	editing        bool
 	dirty          bool
+	draftLines     []string
+	draftSource    string
 	stamp          domain.FileStamp
 	saveErr        error
 	saving         bool
@@ -280,6 +282,7 @@ func (m *Model) applyPreview(msg previewLoadedMsg) {
 func (m *Model) syncDraft() {
 	m.area.SetValue(m.raw)
 	m.dirty = false
+	m.clearDraftLines()
 }
 
 // sync rebuilds the rendered body and pushes it into the viewport.
@@ -308,15 +311,30 @@ func (m Model) gutter() viewport.GutterFunc {
 
 // lineNumbers renders a fixed-width, right-aligned gutter that keeps ANSI intact.
 func lineNumbers(total int) viewport.GutterFunc {
-	digits := len(strconv.Itoa(max(total, 1)))
+	digits := gutterDigits(total)
 
 	return func(ctx viewport.GutterContext) string {
 		if ctx.Soft {
-			return styles.Gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
+			return gutterBlank(digits)
 		}
 
-		return styles.Gutter.Render(fmt.Sprintf("%*d", digits, ctx.Index+1) + gutterSeparator)
+		return gutterNumber(ctx.Index, digits)
 	}
+}
+
+// gutterDigits is the width of the widest number of a block of total lines.
+func gutterDigits(total int) int {
+	return len(strconv.Itoa(max(total, 1)))
+}
+
+// gutterNumber renders one right-aligned number cell.
+func gutterNumber(index, digits int) string {
+	return styles.Gutter.Render(fmt.Sprintf("%*d", digits, index+1) + gutterSeparator)
+}
+
+// gutterBlank renders an empty number cell, so the unnumbered rows keep the column.
+func gutterBlank(digits int) string {
+	return styles.Gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
 }
 
 // header is one line with the path, the mode and the state flags, cut to width.

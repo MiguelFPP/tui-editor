@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
@@ -82,6 +83,7 @@ func (m Model) handleDraftKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	area, cmd := m.area.Update(msg)
 	m.area = area
 	m.dirty = m.area.Value() != m.raw
+	m.refreshDraftLines()
 
 	return m, cmd
 }
@@ -113,6 +115,7 @@ func (m *Model) startEditing() tea.Cmd {
 	m.confirmDiscard = false
 	m.saveErr = nil
 	m.dirty = false
+	m.refreshDraftLines()
 
 	return m.area.Focus()
 }
@@ -122,6 +125,7 @@ func (m Model) stopEditing() Model {
 	m.editing = false
 	m.confirmDiscard = false
 	m.saveErr = nil
+	m.clearDraftLines()
 	m.area.Blur()
 
 	return m
@@ -131,11 +135,29 @@ func (m Model) stopEditing() Model {
 func (m Model) discardDraft() Model {
 	m.area.SetValue(m.raw)
 	m.dirty = false
+	m.clearDraftLines()
 
 	return m.stopEditing()
 }
 
-// draftBody renders the draft, above it the discard confirmation and the last failure.
+// refreshDraftLines re-highlights the draft only when its text changed.
+func (m *Model) refreshDraftLines() {
+	source := m.area.Value()
+	if m.draftLines != nil && source == m.draftSource {
+		return
+	}
+
+	m.draftSource = source
+	m.draftLines = HighlightLines(m.path, source)
+}
+
+// clearDraftLines drops the highlighted draft of the previous text.
+func (m *Model) clearDraftLines() {
+	m.draftLines, m.draftSource = nil, ""
+}
+
+// draftBody renders the draft behind the preview gutter, above it the discard
+// confirmation and the last failure.
 func (m Model) draftBody() string {
 	lines := make([]string, 0, 3)
 	if m.confirmDiscard {
@@ -145,7 +167,41 @@ func (m Model) draftBody() string {
 		lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))
 	}
 
-	return strings.Join(append(lines, m.area.View()), "\n")
+	return strings.Join(append(lines, m.draftWindow(len(lines))...), "\n")
+}
+
+// draftWindow renders the visible rows of the draft, numbered and coloured like
+// the preview; the rows below the draft keep the height of the body.
+func (m Model) draftWindow(extra int) []string {
+	rows := max(m.bodyHeight()-extra, 0)
+	if rows == 0 {
+		return nil
+	}
+
+	lines := m.draftLines
+	if lines == nil {
+		// The cache is filled when the draft opens; a reload drops it first.
+		lines = strings.Split(trimFinalNewline(m.area.Value()), "\n")
+	}
+
+	total := len(lines)
+	digits := gutterDigits(total)
+	cut := lipgloss.NewStyle().MaxWidth(m.width - digits - lipgloss.Width(gutterSeparator))
+	offset := max(m.area.ScrollYOffset(), 0)
+
+	window := make([]string, 0, rows)
+	for row := range rows {
+		index := offset + row
+		if index >= total {
+			window = append(window, gutterBlank(digits))
+
+			continue
+		}
+
+		window = append(window, gutterNumber(index, digits)+cut.Render(expandTabs(lines[index])))
+	}
+
+	return window
 }
 
 // save writes the draft over the file, claiming the stamp of the last read.

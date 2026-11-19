@@ -167,6 +167,16 @@ func lastWrite(t *testing.T, files *fakes.FileService) (string, domain.FileStamp
 	return "", domain.FileStamp{}
 }
 
+// bodyRows returns the rendered rows of the body, without the header.
+func bodyRows(m Model) []string {
+	rows := strings.Split(plain(m.View()), "\n")
+	if len(rows) <= headerRows {
+		return nil
+	}
+
+	return rows[headerRows:]
+}
+
 func TestEditEntersTheDraftAndCapturesInput(t *testing.T) {
 	fx := newDraft()
 	m := fx.open(t)
@@ -333,6 +343,135 @@ func TestDirtyTracksTheDraft(t *testing.T) {
 	}
 }
 
+func TestDraftBodyShowsTheHighlightedLines(t *testing.T) {
+	m := open(t, "main.go", 60, goldenHeight)
+	m = send(t, m, typed('e'))
+
+	body := m.draftBody()
+	if !strings.Contains(body, "\x1b[") {
+		t.Fatalf("draftBody() = %q, want the syntax colours of the draft", body)
+	}
+
+	lines := strings.Split(trimFinalNewline(m.area.Value()), "\n")
+	rows := strings.Split(plain(body), "\n")
+	if len(rows) != m.bodyHeight() {
+		t.Fatalf("draftBody() renders %d rows, want %d", len(rows), m.bodyHeight())
+	}
+	if len(lines) < len(rows) {
+		t.Fatalf("the draft has %d lines, want at least the %d visible rows", len(lines), len(rows))
+	}
+
+	for i, row := range rows {
+		want := fmt.Sprintf("%*d%s%s", gutterDigits(len(lines)), i+1, gutterSeparator, expandTabs(lines[i]))
+		if row != want {
+			t.Errorf("row %d = %q, want the plain draft %q", i, row, want)
+		}
+	}
+}
+
+func TestDraftBodyKeepsTheColourWhileTyping(t *testing.T) {
+	m := open(t, "main.go", 60, 12)
+	m = send(t, m, typed('e'))
+
+	before := m.draftLines
+	if len(before) == 0 || !strings.Contains(before[0], "\x1b[") {
+		t.Fatalf("draftLines = %q, want the highlighted draft", before)
+	}
+
+	m = send(t, m, typed('X'))
+
+	if len(m.draftLines) != len(before)+1 {
+		t.Fatalf("draftLines = %d lines after typing, want %d", len(m.draftLines), len(before)+1)
+	}
+	// The typed line lands at the end, so every line above it keeps its colours.
+	for i, line := range before[:len(before)-1] {
+		if m.draftLines[i] != line {
+			t.Errorf("line %d = %q after typing, want the highlight kept %q", i, m.draftLines[i], line)
+		}
+	}
+	if view := visible(m.View()); !strings.Contains(view, "9 │ X") {
+		t.Errorf("View() = %q, want the typed line", view)
+	}
+}
+
+func TestDraftBodyWithoutALexerStaysPlain(t *testing.T) {
+	m := open(t, "notes.xyz", 60, goldenHeight)
+	m = send(t, m, typed('e'))
+
+	if got := strings.Join(m.draftLines, "\n"); strings.Contains(got, "\x1b[") {
+		t.Errorf("draftLines = %q, want the plain lines of a file without a lexer", got)
+	}
+	if view := visible(m.View()); !strings.Contains(view, "1 │ notas sin formato reconocido") {
+		t.Errorf("View() = %q, want the numbered lines of the draft", view)
+	}
+}
+
+func TestDraftBodyKeepsTheBodyHeight(t *testing.T) {
+	fx := newDraft()
+	m := fx.open(t)
+
+	if got, want := len(bodyRows(m)), m.bodyHeight(); got != want {
+		t.Fatalf("the preview renders %d rows, want %d", got, want)
+	}
+
+	m = send(t, m, typed('e'))
+	if got, want := len(bodyRows(m)), m.bodyHeight(); got != want {
+		t.Fatalf("the draft renders %d rows, want %d", got, want)
+	}
+
+	// A draft shorter than the body keeps the height with blank gutter rows.
+	short := open(t, "notes.xyz", 60, goldenHeight)
+	short = send(t, short, typed('e'))
+	if got, want := len(bodyRows(short)), short.bodyHeight(); got != want {
+		t.Errorf("a short draft renders %d rows, want %d", got, want)
+	}
+
+	// The confirmation and the failure of the save come out of the same body.
+	m.files = nil
+	m = send(t, m, typed('X'))
+	m = send(t, m, ctrlS)
+	if m.saveErr == nil {
+		t.Fatal("saveErr = nil without a file service, want the failure")
+	}
+	m = send(t, m, key(tea.KeyEscape))
+	if !m.confirmDiscard {
+		t.Fatal("confirmDiscard = false, want the confirmation open")
+	}
+	if got, want := len(bodyRows(m)), m.bodyHeight(); got != want {
+		t.Errorf("the draft with its hints renders %d rows, want %d", got, want)
+	}
+}
+
+func TestDraftScrollsWithTheTextareaKeys(t *testing.T) {
+	m := open(t, "long.txt", 40, 8)
+	m = send(t, m, typed('e'))
+
+	// The textarea owns the scroll of the draft; the body follows its offset.
+	for range 5 {
+		m = send(t, m, key(tea.KeyDown))
+	}
+
+	bottom := m.area.ScrollYOffset()
+	if bottom == 0 {
+		t.Fatal("ScrollYOffset() = 0 after moving down, want the draft scrolled")
+	}
+	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", bottom+1, bottom+1)) {
+		t.Errorf("View() = %q, want the row of the scroll offset %d", view, bottom)
+	}
+
+	for range m.bodyHeight() + 2 {
+		m = send(t, m, key(tea.KeyUp))
+	}
+
+	top := m.area.ScrollYOffset()
+	if top >= bottom {
+		t.Fatalf("ScrollYOffset() = %d after moving up, want less than %d", top, bottom)
+	}
+	if view := visible(m.View()); !strings.Contains(view, fmt.Sprintf("%d │ line-%d", top+1, top+1)) {
+		t.Errorf("View() = %q, want the row of the scroll offset %d", view, top)
+	}
+}
+
 func TestSaveWritesTheDraftThroughThePort(t *testing.T) {
 	fx := newDraft()
 	m := fx.open(t)
@@ -390,6 +529,12 @@ func TestSaveWritesTheDraftThroughThePort(t *testing.T) {
 	}
 	if m.stamp != fx.stamp || m.stamp == draftStamp {
 		t.Errorf("stamp = %+v, want the confirmed one %+v", m.stamp, fx.stamp)
+	}
+	if len(m.draftLines) == 0 {
+		t.Error("draftLines is empty after the save, want the draft still rendered")
+	}
+	if view := visible(m.View()); !strings.Contains(view, "4 │ X") {
+		t.Errorf("View() = %q, want the saved draft behind its gutter", view)
 	}
 	if cmd == nil {
 		t.Fatal("no command, want FileChangedMsg")
