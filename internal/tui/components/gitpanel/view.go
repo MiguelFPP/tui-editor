@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
@@ -163,15 +165,24 @@ func (m Model) tabs() string {
 	return strings.Join(rendered, tabSeparator)
 }
 
-// body renders the visible window of the active section.
+// body renders the visible window of the active section, in two columns when the layout splits.
 func (m Model) body() []string {
 	height := m.bodyHeight()
-	rows := m.active()
+
+	// A failure of the panel or of the active section replaces the whole body, split included.
+	if state, ok := m.failureLine(); ok {
+		return pad([]string{state}, height)
+	}
+
+	if m.split {
+		return m.splitBody(height)
+	}
 
 	if state, ok := m.stateLine(); ok {
 		return pad([]string{state}, height)
 	}
 
+	rows := m.active()
 	start := m.offsets[m.section]
 	end := min(start+height, len(rows))
 
@@ -188,13 +199,111 @@ func (m Model) body() []string {
 	return pad(window, height)
 }
 
-// stateLine is the message that replaces the rows while loading or when there is nothing to show.
-func (m Model) stateLine() (string, bool) {
+// splitBody composes the list on the left and the diff preview on the right, one row at a time.
+// Each column keeps its own placeholder, so an empty diff never hides the file list.
+func (m Model) splitBody(height int) []string {
+	listW, previewW := m.listColumns()
+	list := m.column(m.listPlaceholder(), m.scrollList, m.cursors[Changes], listW, height)
+	preview := m.column(m.previewPlaceholder(), m.scrollPreview, m.hunkCursorRow(), previewW, height)
+
+	out := make([]string, 0, height)
+	for row := 0; row < height; row++ {
+		out = append(out, list[row]+preview[row])
+	}
+
+	return out
+}
+
+// listPlaceholder returns the left rows, or the message of an empty or loading section.
+func (m Model) listPlaceholder() []string {
+	if rows := m.listRows(); len(rows) > 0 {
+		return rows
+	}
+
+	switch m.section {
+	case Changes:
+		if m.loading.status {
+			return []string{styles.MetaPlain.Render("cargando…")}
+		}
+		if m.status.Unborn {
+			return []string{styles.MetaPlain.Render("sin commits todavía")}
+		}
+
+		return []string{styles.MetaPlain.Render("sin cambios")}
+	default:
+		return []string{styles.MetaPlain.Render("cargando…")}
+	}
+}
+
+// previewPlaceholder returns the right rows, or the message shown before a diff is loaded.
+func (m Model) previewPlaceholder() []string {
+	if rows := m.previewRows(); len(rows) > 0 {
+		return rows
+	}
+
+	return []string{styles.MetaPlain.Render("sin diff · enter en Cambios para cargarlo")}
+}
+
+// column renders one column of the split body: truncate, highlight the cursor row and pad.
+func (m Model) column(rows []string, offset, cursor, width, height int) []string {
+	out := make([]string, 0, height)
+	for row := 0; row < height; row++ {
+		index := offset + row
+
+		line := ""
+		if index >= 0 && index < len(rows) {
+			line = truncate(rows[index], width)
+			if index == cursor {
+				line = styles.CursorPlain.Render(line)
+			}
+		}
+
+		out = append(out, padCells(line, width))
+	}
+
+	return out
+}
+
+// hunkCursorRow is the row of the preview that starts the hunk under the cursor; the section header
+// occupies the first row.
+func (m Model) hunkCursorRow() int {
+	if m.hunkCursor < 0 || m.hunkCursor >= len(m.hunkRows) {
+		return -1
+	}
+
+	return m.hunkRows[m.hunkCursor].start
+}
+
+// padCells clips line to width cells and fills the rest with spaces.
+func padCells(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	line = truncate(line, width)
+	if gap := width - lipgloss.Width(line); gap > 0 {
+		return line + strings.Repeat(" ", gap)
+	}
+
+	return line
+}
+
+// failureLine is the failure of the panel or of the active section; it replaces the whole body.
+func (m Model) failureLine() (string, bool) {
 	if m.writeErr != nil {
 		return styles.FailPlain.Render(truncate("error al escribir: "+describeError(m.writeErr), m.width)), true
 	}
 	if err := m.sectionError(m.section); err != nil {
 		return styles.FailPlain.Render(truncate("error: "+describeError(err), m.width)), true
+	}
+
+	return "", false
+}
+
+// stateLine is the message that replaces the rows while loading or when there is nothing to show.
+func (m Model) stateLine() (string, bool) {
+	if state, ok := m.failureLine(); ok {
+		return state, true
 	}
 	if m.sectionLoading(m.section) && len(m.active()) == 0 {
 		return styles.MetaPlain.Render("cargando…"), true

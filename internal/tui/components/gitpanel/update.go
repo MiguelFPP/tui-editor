@@ -50,17 +50,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleWheel scrolls the active section without moving its cursor.
+// handleWheel scrolls the active section without moving its cursor; in split mode it scrolls the
+// column under the pointer.
 func (m *Model) handleWheel(ev tea.Mouse) {
+	delta := 0
 	switch ev.Button {
 	case tea.MouseWheelUp:
-		m.offsets[m.section] -= wheelStep
+		delta = -wheelStep
 	case tea.MouseWheelDown:
-		m.offsets[m.section] += wheelStep
+		delta = wheelStep
 	default:
 		return
 	}
 
+	if m.split {
+		point := image.Pt(ev.X, ev.Y)
+		switch {
+		case point.In(m.listRect):
+			m.scrollListBy(delta)
+		case point.In(m.previewRect):
+			m.scrollPreviewBy(delta)
+		}
+
+		return
+	}
+
+	m.offsets[m.section] += delta
 	rows := len(m.rows(m.section))
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
 }
@@ -79,6 +94,18 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 
 	row, ok := m.rowAt(point)
 	if !ok {
+		return nil
+	}
+
+	if m.split {
+		m.cursors[Changes] = row
+		m.scrollList = m.clampOffset(row, len(m.listRows()))
+		if m.section == Diff {
+			if hunk, ok := m.hunkAt(row); ok {
+				m.hunkCursor = hunk
+			}
+		}
+
 		return nil
 	}
 

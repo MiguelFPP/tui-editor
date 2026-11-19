@@ -227,6 +227,10 @@ type Model struct {
 	listRect    image.Rectangle
 	previewRect image.Rectangle
 
+	// scrollList and scrollPreview are the independent offsets of the two columns.
+	scrollList    int
+	scrollPreview int
+
 	help bool
 }
 
@@ -469,6 +473,10 @@ func (m *Model) sync() {
 	m.listW, m.previewW = m.splitWidths(m.width)
 	m.markColumns()
 
+	// Both column offsets survive a resize, clamped to the rows they now have.
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()))
+	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.previewRows()))
+
 	m.clamp(m.section)
 }
 
@@ -479,6 +487,49 @@ func (m Model) splitNow() bool {
 	}
 
 	return m.section == Changes || m.section == Diff
+}
+
+// previewSection reports whether the right column has content to draw.
+func (m Model) previewSection() bool {
+	return m.section == Diff || m.loaded
+}
+
+// listRows returns the rows of the left column: the changes, or the active section when the
+// preview is not shown.
+func (m Model) listRows() []string {
+	if m.section == Diff {
+		return m.changeRows()
+	}
+
+	return m.active()
+}
+
+// previewRows returns the rows of the right column, already formatted.
+func (m Model) previewRows() []string {
+	return m.diffRows()
+}
+
+// listColumns reports the width of each column; the preview gets nothing outside split mode.
+func (m Model) listColumns() (int, int) {
+	if !m.split {
+		return m.width, 0
+	}
+
+	return m.listW, m.previewW
+}
+
+// scrollListBy and scrollPreviewBy move one column's offset without touching the other.
+func (m *Model) scrollListBy(delta int) {
+	m.scrollList = m.clampOffset(m.scrollList+delta, len(m.listRows()))
+}
+
+func (m *Model) scrollPreviewBy(delta int) {
+	m.scrollPreview = m.clampOffset(m.scrollPreview+delta, len(m.previewRows()))
+}
+
+// clampOffset keeps one column offset inside its rows.
+func (m Model) clampOffset(offset, rows int) int {
+	return min(max(offset, 0), max(rows-m.bodyHeight(), 0))
 }
 
 // splitWidths divides the panel width between both columns; in single mode the list takes it all.
@@ -723,8 +774,22 @@ func (m *Model) markTabs() {
 	}
 }
 
-// rowAt maps terminal coordinates to the row index of the active section.
+// rowAt maps terminal coordinates to the row index of the active section. In split mode only the
+// list column answers: the preview is read-only until the column router of the next subphase.
 func (m Model) rowAt(point image.Point) (int, bool) {
+	if m.split {
+		if !point.In(m.listRect) {
+			return 0, false
+		}
+
+		row := m.scrollList + point.Y - m.listRect.Min.Y
+		if row < 0 || row >= len(m.listRows()) {
+			return 0, false
+		}
+
+		return row, true
+	}
+
 	for index, rect := range m.rowRects[m.section] {
 		if !point.In(rect) {
 			continue
