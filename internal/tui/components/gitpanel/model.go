@@ -74,6 +74,11 @@ const (
 	minGitList       = 28
 	minGitPreview    = 34
 	listPercent      = 40
+
+	// frameSide is the chrome one column frame spends on each side.
+	frameSide = 1
+	// listHeaderRows is the fixed header of the left column.
+	listHeaderRows = 1
 )
 
 // Section is one navigable block of the panel.
@@ -495,8 +500,8 @@ func (m *Model) sync() {
 	m.markColumns()
 
 	// Both column offsets survive a resize, clamped to the rows they now have.
-	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()))
-	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.previewRows()))
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()), m.listViewportHeight())
+	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.previewRows()), m.previewViewportHeight())
 
 	m.clamp(m.section)
 }
@@ -523,6 +528,11 @@ func (m Model) splitNow() bool {
 	}
 
 	return m.section == Changes || m.section == Diff
+}
+
+// innerCells returns the cells left by a frame of the given size, never negative.
+func innerCells(size int) int {
+	return max(size-2*frameSide, 0)
 }
 
 // previewSection reports whether the right column has content to draw.
@@ -556,21 +566,21 @@ func (m Model) listColumns() (int, int) {
 
 // scrollListBy and scrollPreviewBy move one column's offset without touching the other.
 func (m *Model) scrollListBy(delta int) {
-	m.scrollList = m.clampOffset(m.scrollList+delta, len(m.listRows()))
+	m.scrollList = m.clampOffset(m.scrollList+delta, len(m.listRows()), m.listViewportHeight())
 }
 
 func (m *Model) scrollPreviewBy(delta int) {
-	m.scrollPreview = m.clampOffset(m.scrollPreview+delta, len(m.previewRows()))
+	m.scrollPreview = m.clampOffset(m.scrollPreview+delta, len(m.previewRows()), m.previewViewportHeight())
 }
 
-// clampOffset keeps one column offset inside its rows.
-func (m Model) clampOffset(offset, rows int) int {
-	return min(max(offset, 0), max(rows-m.bodyHeight(), 0))
+// clampOffset keeps one column offset inside its rows for the given viewport height.
+func (m Model) clampOffset(offset, rows, height int) int {
+	return min(max(offset, 0), max(rows-height, 0))
 }
 
 // scrollListToCursor moves the list offset so the Changes cursor stays visible.
 func (m *Model) scrollListToCursor() {
-	height := m.bodyHeight()
+	height := m.listViewportHeight()
 	if height <= 0 {
 		return
 	}
@@ -583,7 +593,7 @@ func (m *Model) scrollListToCursor() {
 		m.scrollList = cursor - height + 1
 	}
 
-	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()))
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()), height)
 }
 
 // splitWidths divides the panel width between both columns; in single mode the list takes it all.
@@ -617,8 +627,45 @@ func (m *Model) markColumns() {
 		return
 	}
 
-	m.listRect = image.Rect(m.bounds.Min.X, top, m.bounds.Min.X+m.listW, top+height)
-	m.previewRect = image.Rect(m.bounds.Min.X+m.listW, top, m.bounds.Min.X+m.listW+m.previewW, top+height)
+	// The frames are chrome: the clickable area of each column starts one cell inside, and the
+	// left column skips its fixed header row.
+	listTop := top + frameSide + listHeaderRows
+	listHeight := max(innerCells(height)-listHeaderRows, 0)
+	m.listRect = image.Rect(m.bounds.Min.X+frameSide, listTop,
+		m.bounds.Min.X+m.listW-frameSide, listTop+listHeight)
+
+	previewLeft := m.bounds.Min.X + m.listW
+	previewHeight := max(innerCells(height), 0)
+	m.previewRect = image.Rect(previewLeft+frameSide, top+frameSide,
+		previewLeft+m.previewW-frameSide, top+frameSide+previewHeight)
+}
+
+// ListBounds returns the clickable area of the left column, frames excluded.
+func (m Model) ListBounds() image.Rectangle {
+	return m.listRect
+}
+
+// PreviewBounds returns the clickable area of the right column, frames excluded.
+func (m Model) PreviewBounds() image.Rectangle {
+	return m.previewRect
+}
+
+// listViewportHeight is the rows the left column can show, its header excluded.
+func (m Model) listViewportHeight() int {
+	if !m.split {
+		return m.bodyHeight()
+	}
+
+	return max(innerCells(m.bodyHeight())-listHeaderRows, 0)
+}
+
+// previewViewportHeight is the rows the right column can show inside its frame.
+func (m Model) previewViewportHeight() int {
+	if !m.split {
+		return m.bodyHeight()
+	}
+
+	return max(innerCells(m.bodyHeight()), 0)
 }
 
 // diffSpans locates every hunk inside the rows of the diff section, its title line included.

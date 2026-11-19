@@ -199,16 +199,63 @@ func (m Model) body() []string {
 	return pad(window, height)
 }
 
-// splitBody composes the list on the left and the diff preview on the right, one row at a time.
-// Each column keeps its own placeholder, so an empty diff never hides the file list.
+// splitBody composes the list on the left and the diff preview on the right, each one framed.
+// Every column keeps its own placeholder, so an empty diff never hides the file list.
 func (m Model) splitBody(height int) []string {
 	listW, previewW := m.listColumns()
-	list := m.column(m.listPlaceholder(), m.scrollList, m.cursors[Changes], listW, height)
-	preview := m.column(m.previewPlaceholder(), m.scrollPreview, m.hunkCursorRow(), previewW, height)
+	innerH := max(innerCells(height), 0)
+
+	left := frameColumn(m.listPane(innerCells(listW), max(innerH-listHeaderRows, 0)), listW, height)
+	right := frameColumn(m.previewPane(innerCells(previewW), innerH), previewW, height)
 
 	out := make([]string, 0, height)
 	for row := 0; row < height; row++ {
-		out = append(out, list[row]+preview[row])
+		out = append(out, left[row]+right[row])
+	}
+
+	return out
+}
+
+// listPane renders the left column: its fixed header plus the scrollable rows.
+func (m Model) listPane(width, height int) []string {
+	lines := make([]string, 0, height+listHeaderRows)
+	lines = append(lines, padCells(styles.TitlePlain.Render(m.listHeader()), width))
+
+	return append(lines, m.column(m.listPlaceholder(), m.scrollList, m.cursors[Changes], width, height)...)
+}
+
+// previewPane renders the right column; its first row names the diff and scrolls with it.
+func (m Model) previewPane(width, height int) []string {
+	return m.column(m.previewPlaceholder(), m.scrollPreview, m.hunkCursorRow(), width, height)
+}
+
+// listHeader names the left column and counts its rows.
+func (m Model) listHeader() string {
+	return "Cambios · " + strconv.Itoa(len(m.listRows()))
+}
+
+// frameColumn draws a rounded frame around content, exactly width by height cells.
+func frameColumn(content []string, width, height int) []string {
+	if width <= 2*frameSide || height <= 2*frameSide {
+		return fitRows(content, width, height)
+	}
+
+	lines := fitRows(content, innerCells(width), innerCells(height))
+	box := styles.Border.Render(strings.Join(lines, "\n"))
+
+	return strings.Split(box, "\n")
+}
+
+// fitRows clips every row to width cells and pads the slice to exactly height rows.
+func fitRows(rows []string, width, height int) []string {
+	out := make([]string, 0, max(height, 0))
+	for row := 0; row < height; row++ {
+		line := ""
+		if row < len(rows) {
+			line = rows[row]
+		}
+
+		out = append(out, padCells(line, width))
 	}
 
 	return out

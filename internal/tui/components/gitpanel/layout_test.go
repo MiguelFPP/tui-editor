@@ -118,7 +118,7 @@ func TestSplitWidthsKeepTheMinimums(t *testing.T) {
 	}
 }
 
-// TestColumnRectsTileTheBody checks that both columns fill the body without overlapping.
+// TestColumnRectsTileTheBody checks that both inner areas fit inside their frames without overlapping.
 func TestColumnRectsTileTheBody(t *testing.T) {
 	m := open(t, gitFake(t))
 	m.SetBounds(4, 6, 120, 20)
@@ -129,17 +129,34 @@ func TestColumnRectsTileTheBody(t *testing.T) {
 	if m.listRect.Overlaps(m.previewRect) {
 		t.Fatalf("listRect %v overlaps previewRect %v", m.listRect, m.previewRect)
 	}
-	if got, want := m.listRect.Max.X, m.previewRect.Min.X; got != want {
-		t.Errorf("listRect.Max.X = %d, want previewRect.Min.X = %d", got, want)
+
+	// Both frames are chrome: each inner rect keeps one cell of border per side.
+	bodyTop := m.bounds.Min.Y + headerRows
+	if got, want := m.listRect.Min.X, m.bounds.Min.X+frameSide; got != want {
+		t.Errorf("listRect.Min.X = %d, want %d", got, want)
 	}
-	if got, want := m.previewRect.Max.X, m.bounds.Min.X+m.width; got != want {
+	if got, want := m.listRect.Max.X, m.bounds.Min.X+m.listW-frameSide; got != want {
+		t.Errorf("listRect.Max.X = %d, want %d", got, want)
+	}
+	if got, want := m.previewRect.Min.X, m.bounds.Min.X+m.listW+frameSide; got != want {
+		t.Errorf("previewRect.Min.X = %d, want %d", got, want)
+	}
+	if got, want := m.previewRect.Max.X, m.bounds.Min.X+m.width-frameSide; got != want {
 		t.Errorf("previewRect.Max.X = %d, want %d", got, want)
 	}
-	if got, want := m.listRect.Min.Y, m.bounds.Min.Y+headerRows; got != want {
+
+	// The left column also skips its own header row.
+	if got, want := m.listRect.Min.Y, bodyTop+frameSide+listHeaderRows; got != want {
 		t.Errorf("listRect.Min.Y = %d, want %d", got, want)
 	}
-	if got, want := m.listRect.Dy(), m.bodyHeight(); got != want {
+	if got, want := m.listRect.Dy(), max(innerCells(m.bodyHeight())-listHeaderRows, 0); got != want {
 		t.Errorf("listRect height = %d, want %d", got, want)
+	}
+	if got, want := m.previewRect.Dy(), innerCells(m.bodyHeight()); got != want {
+		t.Errorf("previewRect height = %d, want %d", got, want)
+	}
+	if got := m.previewRect.Max.Y; got > m.bounds.Min.Y+m.height-frameSide {
+		t.Errorf("previewRect.Max.Y = %d, want it inside the panel", got)
 	}
 }
 
