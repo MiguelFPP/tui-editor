@@ -100,7 +100,7 @@ func TestDockerServiceHooksAndZeroValues(t *testing.T) {
 	if err := svc.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping() with a nil hook error = %v, want nil", err)
 	}
-	containers, err := svc.Containers(context.Background())
+	containers, err := svc.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil || len(containers) != 0 {
 		t.Errorf("Containers() = %v, %v, want none and nil", containers, err)
 	}
@@ -129,10 +129,10 @@ func TestDockerServiceHooksAndZeroValues(t *testing.T) {
 		t.Errorf("Ping() error = %v, want %v", err, domain.ErrDockerUnavailable)
 	}
 
-	svc.OnContainers = func(ctx context.Context) ([]domain.ContainerSummary, error) {
+	svc.OnContainers = func(context.Context, domain.ContainerScope) ([]domain.ContainerSummary, error) {
 		return []domain.ContainerSummary{{ID: "abc", Name: "web", State: domain.ContainerRunning}}, nil
 	}
-	containers, err = svc.Containers(context.Background())
+	containers, err = svc.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil || len(containers) != 1 || !containers[0].Running() {
 		t.Errorf("Containers() = %+v, %v, want one running container and nil", containers, err)
 	}

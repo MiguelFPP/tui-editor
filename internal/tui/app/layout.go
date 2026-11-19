@@ -5,34 +5,21 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 // toastPrefix marks the statusbar toast, distinct from the panel error lines.
 const toastPrefix = "aviso: "
 
-var styles = struct {
-	title       lipgloss.Style
-	tab         lipgloss.Style
-	tabOn       lipgloss.Style
-	tabSep      lipgloss.Style
-	status      lipgloss.Style
-	help        lipgloss.Style
-	helpTitle   lipgloss.Style
-	helpKey     lipgloss.Style
-	placeholder lipgloss.Style
-	spinner     lipgloss.Style
-}{
-	title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	tab:         lipgloss.NewStyle().Faint(true),
-	tabOn:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	tabSep:      lipgloss.NewStyle().Faint(true),
-	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("#9aa5ce")),
-	help:        lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#565f89")).Padding(0, 2),
-	helpTitle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	helpKey:     lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")),
-	placeholder: lipgloss.NewStyle().Faint(true),
-	spinner:     lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")),
-}
+// tabSeparator joins the top labels; the mouse hit-testing relies on its width.
+const tabSeparator = "│"
+
+// borderSide is the chrome one panel box spends on each of its four sides.
+const borderSide = 1
+
+// resetStyle closes the attributes a clipped panel row may leave open.
+const resetStyle = "\x1b[m"
 
 // resize recomputes the canvas and the panel rectangles; the root owns hit-testing.
 func (m *Model) resize() {
@@ -41,17 +28,49 @@ func (m *Model) resize() {
 	treeW := splitWidth(width)
 	editorW := max(width-treeW, 0)
 
-	m.tree.SetBounds(0, headerRows, treeW, body)
-	if m.hasEditor {
-		m.editor.SetSize(editorW, body)
-	}
-	m.git.SetBounds(0, headerRows, width, body)
-	m.docker.SetBounds(0, headerRows, width, body)
+	// The frames are chrome: every rectangle is the inner area of its box, one cell inside.
+	treeInner := innerRect(0, headerRows, treeW, body)
+	editorInner := innerRect(treeW, headerRows, editorW, body)
+	panelInner := innerRect(0, headerRows, width, body)
 
-	m.treeRect = image.Rect(0, headerRows, treeW, headerRows+body)
-	m.editorRect = image.Rect(treeW, headerRows, width, headerRows+body)
-	m.gitRect = image.Rect(0, headerRows, width, headerRows+body)
-	m.dockerRect = image.Rect(0, headerRows, width, headerRows+body)
+	m.tree.SetBounds(treeInner.Min.X, treeInner.Min.Y, treeInner.Dx(), treeInner.Dy())
+	if m.hasEditor {
+		m.editor.SetSize(editorInner.Dx(), editorInner.Dy())
+	}
+	m.git.SetBounds(panelInner.Min.X, panelInner.Min.Y, panelInner.Dx(), panelInner.Dy())
+	m.docker.SetBounds(panelInner.Min.X, panelInner.Min.Y, panelInner.Dx(), panelInner.Dy())
+
+	m.treeRect, m.editorRect = treeInner, editorInner
+	m.gitRect, m.dockerRect = panelInner, panelInner
+	m.markTabs(width)
+}
+
+// innerRect is the area left inside the frame of a box at x, y with the given outer size.
+func innerRect(x, y, width, height int) image.Rectangle {
+	x, y = x+borderSide, y+borderSide
+
+	return image.Rect(x, y, x+innerCells(width), y+innerCells(height))
+}
+
+// innerCells returns the cells left by the frame of a box, never negative.
+func innerCells(size int) int {
+	return max(size-2*borderSide, 0)
+}
+
+// markTabs stores the rectangle of every top tab, on the row between the title and the body.
+func (m *Model) markTabs(width int) {
+	m.tabRects = [tabCount]image.Rectangle{}
+
+	column := 0
+	for tab := Tab(0); tab < tabCount; tab++ {
+		size := lipgloss.Width(tabLabels[tab])
+		if column+size > width {
+			return // the labels a narrow row cannot show are not clickable
+		}
+
+		m.tabRects[tab] = image.Rect(column, headerRows-1, column+size, headerRows)
+		column += size + lipgloss.Width(tabSeparator)
+	}
 }
 
 func (m Model) canvas() (int, int) {
@@ -74,7 +93,7 @@ func (m Model) render() string {
 	width, height := m.canvas()
 
 	lines := make([]string, 0, height)
-	lines = append(lines, styles.title.Render(clipCells(" tui-editor ", width)))
+	lines = append(lines, styles.Title.Render(clipCells(" tui-editor ", width)))
 	lines = append(lines, m.tabsLine(width))
 	lines = append(lines, m.body(width, height)...)
 	lines = append(lines, m.statusLine(width))
@@ -87,22 +106,22 @@ func (m Model) render() string {
 	return content
 }
 
-// body renders the panels of the active tab, always exactly bodyHeight rows high.
+// body renders the framed panels of the active tab, always exactly bodyHeight rows high.
 func (m Model) body(width, height int) []string {
 	rows := bodyHeight(height)
 
 	switch m.tab {
 	case GitTab:
-		return fitBox(m.git.View(), width, rows)
+		return fitBox(m.box(m.git.View(), width, rows, m.focus == FocusGit), width, rows)
 	case DockerTab:
-		return fitBox(m.docker.View(), width, rows)
+		return fitBox(m.box(m.docker.View(), width, rows, m.focus == FocusDocker), width, rows)
 	}
 
 	treeW := splitWidth(width)
 	editorW := max(width-treeW, 0)
 
-	treeLines := fitBox(m.tree.View(), treeW, rows)
-	editorLines := fitBox(m.editorBox(editorW, rows), editorW, rows)
+	treeLines := fitBox(m.box(m.tree.View(), treeW, rows, m.focus == FocusTree), treeW, rows)
+	editorLines := fitBox(m.box(m.editorBox(innerCells(editorW), innerCells(rows)), editorW, rows, m.focus == FocusEditor), editorW, rows)
 
 	out := make([]string, 0, rows)
 	for i := range treeLines {
@@ -112,6 +131,27 @@ func (m Model) body(width, height int) []string {
 	return out
 }
 
+// box draws content inside a framed box of exactly width x height cells; focused picks the token.
+func (m Model) box(content string, width, height int, focused bool) string {
+	innerWidth, innerHeight := innerCells(width), innerCells(height)
+	if innerWidth < 1 || innerHeight < 1 {
+		// No room for a frame: the bare content keeps the layout tiling exactly.
+		return strings.Join(fitBox(content, width, height), "\n")
+	}
+
+	lines := fitBox(content, innerWidth, innerHeight)
+	for i, line := range lines {
+		lines[i] = line + resetStyle // an attribute left open must not reach the frame
+	}
+
+	style := styles.Border
+	if focused {
+		style = styles.BorderFocused
+	}
+
+	return style.Render(strings.Join(lines, "\n"))
+}
+
 // editorBox renders the preview, or the placeholder before a file is chosen.
 func (m Model) editorBox(width, height int) string {
 	if m.hasEditor {
@@ -119,26 +159,26 @@ func (m Model) editorBox(width, height int) string {
 	}
 
 	return lipgloss.Place(max(width, 1), max(height, 1), lipgloss.Center, lipgloss.Center,
-		styles.placeholder.Render("selecciona un archivo"))
+		styles.Placeholder.Render("selecciona un archivo"))
 }
 
 func (m Model) tabsLine(width int) string {
-	files := styles.tab.Render(" Files ")
-	git := styles.tab.Render(" Git ")
-	docker := styles.tab.Render(" Docker ")
+	parts := make([]string, 0, tabCount*2-1)
 
-	switch m.tab {
-	case FilesTab:
-		files = styles.tabOn.Render(" Files ")
-	case GitTab:
-		git = styles.tabOn.Render(" Git ")
-	default:
-		docker = styles.tabOn.Render(" Docker ")
+	for tab := Tab(0); tab < tabCount; tab++ {
+		if tab > 0 {
+			parts = append(parts, styles.TabSeparator.Render(tabSeparator))
+		}
+
+		style := styles.Tab
+		if tab == m.tab {
+			style = styles.TabActive
+		}
+
+		parts = append(parts, style.Render(tabLabels[tab]))
 	}
 
-	line := files + styles.tabSep.Render("│") + git + styles.tabSep.Render("│") + docker
-
-	return padLine(line, width)
+	return padLine(strings.Join(parts, ""), width)
 }
 
 // statusLine shows the repo, the tab, the focus, the hints, the spinner and the toast.
@@ -161,12 +201,12 @@ func (m Model) statusLine(width int) string {
 		text = m.spinner.View() + " " + text
 	}
 
-	return styles.status.Render(clipCells(text, width))
+	return styles.Status.Render(clipCells(text, width))
 }
 
 // helpOverlay centers the help box over the layout without changing its size.
 func (m Model) helpOverlay(base string, width, height int) string {
-	box := styles.help.Render(strings.Join(helpLines(), "\n"))
+	box := styles.Help.Render(strings.Join(helpLines(), "\n"))
 	boxLines := strings.Split(box, "\n")
 
 	left := max((width-lipgloss.Width(box))/2, 0)

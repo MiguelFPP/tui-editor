@@ -66,7 +66,7 @@ func testDeps(t *testing.T) Deps {
 	}
 
 	docker := fakes.NewDockerService()
-	docker.OnContainers = func(context.Context) ([]domain.ContainerSummary, error) {
+	docker.OnContainers = func(context.Context, domain.ContainerScope) ([]domain.ContainerSummary, error) {
 		return []domain.ContainerSummary{
 			{ID: "aaaaaaaaaaaaaaaa", Name: "web", Image: "nginx:latest", State: domain.ContainerRunning},
 		}, nil
@@ -224,8 +224,8 @@ func TestModelWindowSize(t *testing.T) {
 	if m.treeRect.Dx() == 0 || m.editorRect.Dx() == 0 {
 		t.Errorf("panel rects = %v / %v, want both non-empty", m.treeRect, m.editorRect)
 	}
-	if m.gitRect.Dx() != 120 {
-		t.Errorf("git rect width = %d, want the full width", m.gitRect.Dx())
+	if got, want := m.gitRect.Dx()+2*borderSide, 120; got != want {
+		t.Errorf("git frame width = %d, want the full width %d", got, want)
 	}
 	if m.treeRect.Max.Y > m.height {
 		t.Errorf("tree rect %v exceeds the canvas", m.treeRect)
@@ -672,5 +672,37 @@ func TestGitStageAndCommitThroughTheRoot(t *testing.T) {
 	next = update(t, next, typed('1'))
 	if next.Tab() != FilesTab {
 		t.Errorf("Tab() = %v, want the root shortcuts back", next.Tab())
+	}
+}
+
+func TestMouseClickOnTheEditorIsRebasedOntoThePanel(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "long.txt") // enough lines for an absolute click to miss the row
+	m = update(t, m, typed('e'))
+
+	if !m.editor.CapturesInput() {
+		t.Fatal("CapturesInput() = false, want the draft")
+	}
+
+	// An absolute click on the second body row must land there, not two rows below it.
+	m = update(t, m, click(m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+
+	if got := m.Focus(); got != FocusEditor {
+		t.Errorf("Focus() = %v, want the editor", got)
+	}
+	if got := m.editor.CaretLine(); got != 1 {
+		t.Errorf("CaretLine() = %d, want row 1 of the draft", got)
+	}
+}
+
+func TestMouseWheelOnTheEditorKeepsWorkingWithoutCoordinates(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "main.go")
+	m = update(t, m, typed('e'))
+
+	m = update(t, m, wheel(tea.MouseWheelDown, m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+
+	if got := m.Focus(); got != FocusEditor {
+		t.Errorf("Focus() = %v, want the editor", got)
 	}
 }

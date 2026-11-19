@@ -2,6 +2,8 @@ package domain
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -100,16 +102,24 @@ func (p PortMapping) String() string {
 	return fmt.Sprintf("%s:%d->%s", p.HostIP, p.HostPort, container)
 }
 
+// Compose labels that tie a container to a project directory.
+const (
+	LabelComposeProject    = "com.docker.compose.project"
+	LabelComposeWorkingDir = "com.docker.compose.project.working_dir"
+)
+
 // ContainerSummary is one row of the container list.
 type ContainerSummary struct {
-	ID        string
-	Name      string
-	Image     string
-	State     ContainerState
-	Health    HealthState
-	Ports     []PortMapping
-	CreatedAt time.Time
-	StartedAt time.Time
+	ID         string
+	Name       string
+	Image      string
+	State      ContainerState
+	Health     HealthState
+	Ports      []PortMapping
+	CreatedAt  time.Time
+	StartedAt  time.Time
+	Project    string // com.docker.compose.project
+	WorkingDir string // com.docker.compose.project.working_dir
 }
 
 const shortIDLength = 12
@@ -124,6 +134,42 @@ func (c ContainerSummary) ShortID() string {
 
 func (c ContainerSummary) Running() bool {
 	return c.State == ContainerRunning
+}
+
+// ContainerScope narrows the list to one compose project; the zero value lists everything.
+type ContainerScope struct {
+	WorkingDir string
+	Project    string
+}
+
+// Filtered reports whether the scope narrows the list; the zero value does not.
+func (s ContainerScope) Filtered() bool {
+	return s.WorkingDir != "" || s.Project != ""
+}
+
+// InScope reports whether the container belongs to scope.
+func (c ContainerSummary) InScope(scope ContainerScope) bool {
+	if !scope.Filtered() {
+		return true
+	}
+	if c.WorkingDir != "" && scope.WorkingDir != "" {
+		return samePath(c.WorkingDir, scope.WorkingDir)
+	}
+	if c.Project != "" && scope.Project != "" {
+		return c.Project == scope.Project
+	}
+
+	return false
+}
+
+// samePath compares two container paths after cleaning them and normalising the separators.
+func samePath(a, b string) bool {
+	return cleanPath(a) == cleanPath(b)
+}
+
+// cleanPath makes a Windows-style label comparable on any platform.
+func cleanPath(path string) string {
+	return filepath.Clean(strings.ReplaceAll(path, `\`, "/"))
 }
 
 // ContainerStats is one one-shot stats sample, never a live stream.

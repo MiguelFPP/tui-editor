@@ -15,7 +15,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
@@ -138,27 +137,6 @@ type writeDoneMsg struct {
 }
 
 var errNoService = errors.New("gitpanel: servicio de git no configurado")
-
-var styles = struct {
-	title  lipgloss.Style
-	tab    lipgloss.Style
-	tabOn  lipgloss.Style
-	cursor lipgloss.Style
-	meta   lipgloss.Style
-	fail   lipgloss.Style
-}{
-	title:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	tab:    plainCells(lipgloss.NewStyle().Faint(true)),
-	tabOn:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	cursor: plainCells(lipgloss.NewStyle().Bold(true).Reverse(true)),
-	meta:   plainCells(lipgloss.NewStyle().Faint(true)),
-	fail:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched, so the rendered rows match the parsed text.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {

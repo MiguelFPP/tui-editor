@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
@@ -50,6 +50,10 @@ const (
 
 	// unavailableText is the actionable message shown when the daemon cannot be reached.
 	unavailableText = "docker no disponible · revisa el socket y pulsa r para reintentar"
+
+	// scope labels name the active mode of the container list.
+	scopeProject = "alcance: proyecto"
+	scopeAll     = "alcance: todos"
 
 	// logTimeLayout is the timestamp prefix of a rendered log line.
 	logTimeLayout = "15:04:05"
@@ -141,33 +145,18 @@ func (k confirmKind) question(name string) string {
 
 var errNoService = errors.New("dockerpanel: servicio de docker no configurado")
 
-var styles = struct {
-	title  lipgloss.Style
-	header lipgloss.Style
-	cursor lipgloss.Style
-	meta   lipgloss.Style
-	fail   lipgloss.Style
-}{
-	title:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	header: plainCells(lipgloss.NewStyle().Faint(true)),
-	cursor: plainCells(lipgloss.NewStyle().Bold(true).Reverse(true)),
-	meta:   plainCells(lipgloss.NewStyle().Faint(true)),
-	fail:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched, so the rendered rows match the decoded text.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
-
 // Model is the Docker panel; it never performs I/O outside a command.
 type Model struct {
-	docker ports.DockerService
+	docker   ports.DockerService
+	repoRoot string
+	showAll  bool
+	scope    domain.ContainerScope
 
 	containers []domain.ContainerSummary
 	rows       []string
 	cursor     int
 	offset     int
+	anchoredID string
 
 	stats      domain.ContainerStats
 	statsID    string
@@ -213,18 +202,30 @@ type Model struct {
 	rowRects []image.Rectangle
 }
 
-// New builds the panel; nothing is read until the tab becomes active.
-func New(docker ports.DockerService) Model {
+// New builds the panel scoped to repoRoot; nothing is read until the tab becomes active.
+func New(docker ports.DockerService, repoRoot string) Model {
 	m := Model{
 		docker:   docker,
+		repoRoot: strings.TrimSpace(repoRoot),
 		viewport: viewport.New(),
 		interval: defaultTickInterval,
 	}
+	m.showAll = m.repoRoot == "" // an unknown root must never hide every container
+	m.scope = m.buildScope()
 	m.viewport.FillHeight = true
 	m.viewport.MouseWheelEnabled = true
 	m.SetSize(defaultWidth, defaultHeight)
 
 	return m
+}
+
+// buildScope derives the scope; an unknown root lists everything.
+func (m Model) buildScope() domain.ContainerScope {
+	if m.showAll || m.repoRoot == "" {
+		return domain.ContainerScope{}
+	}
+
+	return domain.ContainerScope{WorkingDir: m.repoRoot, Project: filepath.Base(m.repoRoot)}
 }
 
 // Loading reports whether a read or an action is still in flight.
@@ -352,9 +353,9 @@ func (m Model) unavailable() bool {
 		errors.Is(m.Err(), errNoService)
 }
 
-// titleText is the header: the identity of the panel, its state and the stats of the selection.
+// titleText is the header: identity, scope, state and stats of the selection.
 func (m Model) titleText() string {
-	parts := []string{"docker"}
+	parts := []string{"docker", m.scopeLabel()}
 	if state := m.stateLabel(); state != "" {
 		parts = append(parts, state)
 	}
@@ -368,6 +369,24 @@ func (m Model) titleText() string {
 	}
 
 	return strings.Join(parts, columnSeparator)
+}
+
+// scopeLabel names the active mode of the container list.
+func (m Model) scopeLabel() string {
+	if m.showAll {
+		return scopeAll
+	}
+
+	return scopeProject
+}
+
+// scopeHint names the key that switches the scope and what it would show.
+func (m Model) scopeHint() string {
+	if m.showAll {
+		return "a: ver proyecto"
+	}
+
+	return "a: ver todos"
 }
 
 // statsLabel describes the last sample, but only while it belongs to the current selection.

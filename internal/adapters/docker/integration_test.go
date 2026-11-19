@@ -331,7 +331,7 @@ func integrationList(t *testing.T, service *Service) []domain.ContainerSummary {
 	ctx, cancel := context.WithTimeout(context.Background(), integrationWait)
 	defer cancel()
 
-	summaries, err := service.Containers(ctx)
+	summaries, err := service.Containers(ctx, domain.ContainerScope{})
 	if err != nil {
 		t.Fatalf("Containers() error = %v, want nil", err)
 	}
