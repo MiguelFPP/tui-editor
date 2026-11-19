@@ -532,6 +532,24 @@ func (m Model) clampOffset(offset, rows int) int {
 	return min(max(offset, 0), max(rows-m.bodyHeight(), 0))
 }
 
+// scrollListToCursor moves the list offset so the Changes cursor stays visible.
+func (m *Model) scrollListToCursor() {
+	height := m.bodyHeight()
+	if height <= 0 {
+		return
+	}
+
+	cursor := m.cursors[Changes]
+	if cursor < m.scrollList {
+		m.scrollList = cursor
+	}
+	if cursor >= m.scrollList+height {
+		m.scrollList = cursor - height + 1
+	}
+
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()))
+}
+
 // splitWidths divides the panel width between both columns; in single mode the list takes it all.
 func (m Model) splitWidths(panelW int) (int, int) {
 	if !m.split {
@@ -774,20 +792,11 @@ func (m *Model) markTabs() {
 	}
 }
 
-// rowAt maps terminal coordinates to the row index of the active section. In split mode only the
-// list column answers: the preview is read-only until the column router of the next subphase.
+// rowAt maps terminal coordinates to the row index of the active section. In split mode it only
+// answers for the list column: the preview has its own router.
 func (m Model) rowAt(point image.Point) (int, bool) {
 	if m.split {
-		if !point.In(m.listRect) {
-			return 0, false
-		}
-
-		row := m.scrollList + point.Y - m.listRect.Min.Y
-		if row < 0 || row >= len(m.listRows()) {
-			return 0, false
-		}
-
-		return row, true
+		return m.listRowAt(point)
 	}
 
 	for index, rect := range m.rowRects[m.section] {
@@ -804,6 +813,34 @@ func (m Model) rowAt(point image.Point) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// listRowAt maps a point inside the left column to an index of its rows.
+func (m Model) listRowAt(point image.Point) (int, bool) {
+	if !point.In(m.listRect) {
+		return 0, false
+	}
+
+	row := m.scrollList + point.Y - m.listRect.Min.Y
+	if row < 0 || row >= len(m.listRows()) {
+		return 0, false
+	}
+
+	return row, true
+}
+
+// previewRowAt maps a point inside the right column to an index of the cached diff rows.
+func (m Model) previewRowAt(point image.Point) (int, bool) {
+	if !m.split || !point.In(m.previewRect) {
+		return 0, false
+	}
+
+	row := m.scrollPreview + point.Y - m.previewRect.Min.Y
+	if row < 0 || row >= len(m.previewRows()) {
+		return 0, false
+	}
+
+	return row, true
 }
 
 // tabAt maps terminal coordinates to one of the visible section tabs.

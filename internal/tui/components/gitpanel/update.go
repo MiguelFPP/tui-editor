@@ -80,8 +80,8 @@ func (m *Model) handleWheel(ev tea.Mouse) {
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
 }
 
-// handleClick selects the row under the cursor; in Diff it also moves the hunk cursor to the hunk
-// that covers the row, and it never stages anything.
+// handleClick selects the row under the cursor. In split mode each column owns its own cursor, so a
+// click on the preview moves the hunk cursor and never changes the selected file.
 func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 	if ev.Button != tea.MouseLeft || m.help || m.CapturesInput() {
 		return nil
@@ -92,20 +92,12 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 		return m.showSection(section)
 	}
 
-	row, ok := m.rowAt(point)
-	if !ok {
-		return nil
+	if m.split {
+		return m.clickColumn(point)
 	}
 
-	if m.split {
-		m.cursors[Changes] = row
-		m.scrollList = m.clampOffset(row, len(m.listRows()))
-		if m.section == Diff {
-			if hunk, ok := m.hunkAt(row); ok {
-				m.hunkCursor = hunk
-			}
-		}
-
+	row, ok := m.rowAt(point)
+	if !ok {
 		return nil
 	}
 
@@ -115,6 +107,26 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 		if hunk, ok := m.hunkAt(row); ok {
 			m.hunkCursor = hunk
 		}
+	}
+
+	return nil
+}
+
+// clickColumn routes a click of the split body to the column that owns the point.
+func (m *Model) clickColumn(point image.Point) tea.Cmd {
+	if row, ok := m.listRowAt(point); ok {
+		m.cursors[Changes] = row
+		m.scrollListToCursor()
+
+		return nil
+	}
+
+	row, ok := m.previewRowAt(point)
+	if !ok {
+		return nil
+	}
+	if hunk, ok := m.hunkAt(row); ok {
+		m.hunkCursor = hunk
 	}
 
 	return nil
@@ -247,6 +259,11 @@ func (m *Model) moveCursor(delta int) {
 
 	m.cursors[m.section] = min(max(m.cursors[m.section]+delta, 0), rows-1)
 	m.scrollToCursor(m.section)
+
+	// The left column of the split body follows the cursor of the Changes section.
+	if m.split && m.section == Changes {
+		m.scrollListToCursor()
+	}
 }
 
 // activate opens the diff of the selected file, checks out the selected branch, or applies the
