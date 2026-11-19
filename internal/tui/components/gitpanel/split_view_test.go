@@ -170,3 +170,52 @@ func TestSplitFailureReplacesTheWholeBody(t *testing.T) {
 		t.Fatalf("body = %q, want the failure line", text)
 	}
 }
+
+// TestNarrowWidthsKeepTheLayoutIntact crosses the threshold in one-cell steps.
+func TestNarrowWidthsKeepTheLayoutIntact(t *testing.T) {
+	for _, width := range []int{40, 60, 99, 100, 101, 120} {
+		for _, height := range []int{6, 10, 20, 40} {
+			m := open(t, gitFake(t))
+			m.SetSize(width, height)
+
+			body := m.body()
+			if got, want := len(body), m.bodyHeight(); got != want {
+				t.Errorf("%dx%d: body rows = %d, want %d", width, height, got, want)
+			}
+			for index, line := range body {
+				got := len([]rune(plain(line)))
+				if m.split && got != width {
+					t.Fatalf("%dx%d: row %d width = %d, want %d", width, height, index, got, width)
+				}
+				if got > width {
+					t.Fatalf("%dx%d: row %d width = %d, want at most %d", width, height, index, got, width)
+				}
+			}
+			if m.split != (width >= gitSplitMinWidth) {
+				t.Errorf("%dx%d: split = %v, want %v", width, height, m.split, width >= gitSplitMinWidth)
+			}
+			if got := len(strings.Split(m.View(), "\n")); got != m.bodyHeight()+headerRows+footerRows {
+				t.Errorf("%dx%d: View rows = %d, want %d",
+					width, height, got, m.bodyHeight()+headerRows+footerRows)
+			}
+		}
+	}
+}
+
+// TestHelpDocumentsTheLayoutToggle keeps the key discoverable.
+func TestHelpDocumentsTheLayoutToggle(t *testing.T) {
+	m := openWith(t, gitFake(t), overrideKeys(t, map[string][]string{"git_layout_toggle": {"g"}}))
+	m.SetSize(120, 40)
+
+	m = press(t, m, key('?'))
+	view := plain(m.View())
+	if !strings.Contains(view, "g") || !strings.Contains(view, "alternar una o dos columnas") {
+		t.Errorf("View() = %q, want the toggle documented with its effective key", view)
+	}
+
+	m = press(t, m, key('?'))
+	footer := m.footerText()
+	if !strings.Contains(footer, "g: columnas") {
+		t.Errorf("footer = %q, want the toggle hint", footer)
+	}
+}

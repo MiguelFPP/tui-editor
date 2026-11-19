@@ -349,6 +349,10 @@ func (m Model) footerText() string {
 		m.keys.Label(keymap.ActionGitUp)+"/"+m.keys.Label(keymap.ActionGitDown)+": mover",
 	)
 
+	if m.section == Changes || m.section == Diff {
+		parts = append(parts, m.keys.Label(keymap.ActionGitLayoutToggle)+": columnas")
+	}
+
 	switch m.section {
 	case Changes:
 		parts = append(parts,
@@ -434,6 +438,8 @@ func (m Model) helpLines() []string {
 			"mover el cursor; la rueda desplaza la lista"),
 		helpRow(m.keys.Label(keymap.ActionGitRefresh),
 			"refrescar estado, ramas, stash e historial"),
+		helpRow(m.keys.Label(keymap.ActionGitLayoutToggle),
+			"alternar una o dos columnas en Cambios y Diff"),
 		helpRow(m.keys.Label(keymap.ActionGitFetch)+" / "+m.keys.Label(keymap.ActionGitPull)+" / "+m.keys.Label(keymap.ActionGitPush),
 			"fetch, pull y push"),
 		helpRow(m.keys.Label(keymap.ActionGitBack),
