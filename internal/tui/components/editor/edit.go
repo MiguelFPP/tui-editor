@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 // FileChangedMsg tells the root that the file on disk changed and Git must refresh.
@@ -138,10 +139,10 @@ func (m Model) discardDraft() Model {
 func (m Model) draftBody() string {
 	lines := make([]string, 0, 3)
 	if m.confirmDiscard {
-		lines = append(lines, styles.fail.Render(draftHint))
+		lines = append(lines, styles.FailPlain.Render(draftHint))
 	}
 	if m.saveErr != nil {
-		lines = append(lines, styles.fail.Render("error: "+describeError(m.saveErr)))
+		lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))
 	}
 
 	return strings.Join(append(lines, m.area.View()), "\n")

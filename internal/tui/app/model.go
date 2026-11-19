@@ -16,6 +16,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/editor"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -128,7 +129,7 @@ func New(deps Deps) Model {
 		focus:    FocusTree,
 		width:    defaultWidth,
 		height:   defaultHeight,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.spinner)),
+		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
 		spinning: true,
 	}
 	m.resize()

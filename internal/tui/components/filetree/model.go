@@ -11,10 +11,10 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -46,18 +46,6 @@ type dirLoadedMsg struct {
 }
 
 var errNoService = errors.New("filetree: servicio de archivos no configurado")
-
-var styles = struct {
-	dir    lipgloss.Style
-	cursor lipgloss.Style
-	meta   lipgloss.Style
-	fail   lipgloss.Style
-}{
-	dir:    lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")),
-	cursor: lipgloss.NewStyle().Bold(true).Reverse(true),
-	meta:   lipgloss.NewStyle().Faint(true),
-	fail:   lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e")),
-}
 
 // Model is the filetree component: it owns no I/O, only the loaded tree state.
 type Model struct {
@@ -539,11 +527,11 @@ func (m Model) headerRows() int {
 func (m Model) headerLine() (string, bool) {
 	switch {
 	case m.err != nil:
-		return styles.fail.Render("error: " + m.err.Error()), true
+		return styles.Fail.Render("error: " + m.err.Error()), true
 	case m.filtering:
-		return styles.meta.Render("/" + m.filter + "▏"), true
+		return styles.Meta.Render("/" + m.filter + "▏"), true
 	case m.filter != "":
-		return styles.meta.Render("filtro: /" + m.filter), true
+		return styles.Meta.Render("filtro: /" + m.filter), true
 	default:
 		return "", false
 	}
@@ -554,11 +542,11 @@ func (m Model) emptyLine() (string, bool) {
 	case m.err != nil:
 		return "", false
 	case m.loadingNow():
-		return styles.meta.Render("cargando…"), true
+		return styles.Meta.Render("cargando…"), true
 	case m.filter != "":
-		return styles.meta.Render("sin coincidencias"), true
+		return styles.Meta.Render("sin coincidencias"), true
 	default:
-		return styles.meta.Render("vacío"), true
+		return styles.Meta.Render("vacío"), true
 	}
 }
 
@@ -571,9 +559,9 @@ func (m Model) row(item Item, active bool) string {
 
 	switch {
 	case active:
-		return styles.cursor.Render(text)
+		return styles.Cursor.Render(text)
 	case item.Node.Kind == domain.Dir:
-		return styles.dir.Render(text)
+		return styles.Dir.Render(text)
 	default:
 		return text
 	}

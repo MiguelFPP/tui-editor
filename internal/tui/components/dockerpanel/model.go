@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
@@ -140,25 +139,6 @@ func (k confirmKind) question(name string) string {
 }
 
 var errNoService = errors.New("dockerpanel: servicio de docker no configurado")
-
-var styles = struct {
-	title  lipgloss.Style
-	header lipgloss.Style
-	cursor lipgloss.Style
-	meta   lipgloss.Style
-	fail   lipgloss.Style
-}{
-	title:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	header: plainCells(lipgloss.NewStyle().Faint(true)),
-	cursor: plainCells(lipgloss.NewStyle().Bold(true).Reverse(true)),
-	meta:   plainCells(lipgloss.NewStyle().Faint(true)),
-	fail:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched, so the rendered rows match the decoded text.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
 
 // Model is the Docker panel; it never performs I/O outside a command.
 type Model struct {

@@ -5,34 +5,12 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 // toastPrefix marks the statusbar toast, distinct from the panel error lines.
 const toastPrefix = "aviso: "
-
-var styles = struct {
-	title       lipgloss.Style
-	tab         lipgloss.Style
-	tabOn       lipgloss.Style
-	tabSep      lipgloss.Style
-	status      lipgloss.Style
-	help        lipgloss.Style
-	helpTitle   lipgloss.Style
-	helpKey     lipgloss.Style
-	placeholder lipgloss.Style
-	spinner     lipgloss.Style
-}{
-	title:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	tab:         lipgloss.NewStyle().Faint(true),
-	tabOn:       lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	tabSep:      lipgloss.NewStyle().Faint(true),
-	status:      lipgloss.NewStyle().Foreground(lipgloss.Color("#9aa5ce")),
-	help:        lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#565f89")).Padding(0, 2),
-	helpTitle:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
-	helpKey:     lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")),
-	placeholder: lipgloss.NewStyle().Faint(true),
-	spinner:     lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")),
-}
 
 // resize recomputes the canvas and the panel rectangles; the root owns hit-testing.
 func (m *Model) resize() {
@@ -74,7 +52,7 @@ func (m Model) render() string {
 	width, height := m.canvas()
 
 	lines := make([]string, 0, height)
-	lines = append(lines, styles.title.Render(clipCells(" tui-editor ", width)))
+	lines = append(lines, styles.Title.Render(clipCells(" tui-editor ", width)))
 	lines = append(lines, m.tabsLine(width))
 	lines = append(lines, m.body(width, height)...)
 	lines = append(lines, m.statusLine(width))
@@ -119,24 +97,24 @@ func (m Model) editorBox(width, height int) string {
 	}
 
 	return lipgloss.Place(max(width, 1), max(height, 1), lipgloss.Center, lipgloss.Center,
-		styles.placeholder.Render("selecciona un archivo"))
+		styles.Placeholder.Render("selecciona un archivo"))
 }
 
 func (m Model) tabsLine(width int) string {
-	files := styles.tab.Render(" Files ")
-	git := styles.tab.Render(" Git ")
-	docker := styles.tab.Render(" Docker ")
+	files := styles.Tab.Render(" Files ")
+	git := styles.Tab.Render(" Git ")
+	docker := styles.Tab.Render(" Docker ")
 
 	switch m.tab {
 	case FilesTab:
-		files = styles.tabOn.Render(" Files ")
+		files = styles.TabActive.Render(" Files ")
 	case GitTab:
-		git = styles.tabOn.Render(" Git ")
+		git = styles.TabActive.Render(" Git ")
 	default:
-		docker = styles.tabOn.Render(" Docker ")
+		docker = styles.TabActive.Render(" Docker ")
 	}
 
-	line := files + styles.tabSep.Render("│") + git + styles.tabSep.Render("│") + docker
+	line := files + styles.TabSeparator.Render("│") + git + styles.TabSeparator.Render("│") + docker
 
 	return padLine(line, width)
 }
@@ -161,12 +139,12 @@ func (m Model) statusLine(width int) string {
 		text = m.spinner.View() + " " + text
 	}
 
-	return styles.status.Render(clipCells(text, width))
+	return styles.Status.Render(clipCells(text, width))
 }
 
 // helpOverlay centers the help box over the layout without changing its size.
 func (m Model) helpOverlay(base string, width, height int) string {
-	box := styles.help.Render(strings.Join(helpLines(), "\n"))
+	box := styles.Help.Render(strings.Join(helpLines(), "\n"))
 	boxLines := strings.Split(box, "\n")
 
 	left := max((width-lipgloss.Width(box))/2, 0)

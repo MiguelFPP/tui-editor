@@ -1,6 +1,10 @@
 package dockerpanel
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
+)
 
 // View composes the header, the container table or the logs, and the footer.
 func (m Model) View() string {
@@ -9,8 +13,8 @@ func (m Model) View() string {
 	}
 
 	lines := make([]string, 0, m.height)
-	lines = append(lines, styles.title.Render(truncate(m.titleText(), m.width)))
-	lines = append(lines, styles.header.Render(truncate(columnHeader(), m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate(m.titleText(), m.width)))
+	lines = append(lines, styles.Header.Render(truncate(columnHeader(), m.width)))
 
 	switch {
 	case m.confirm != confirmNone:
@@ -21,7 +25,7 @@ func (m Model) View() string {
 		} else {
 			lines = append(lines, m.bodyRows()...)
 		}
-		lines = append(lines, styles.meta.Render(truncate(m.footerText(), m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate(m.footerText(), m.width)))
 	}
 
 	return strings.Join(lines, "\n")
@@ -31,15 +35,15 @@ func (m Model) View() string {
 func (m Model) stateLine() (string, bool) {
 	switch {
 	case m.actionErr != nil:
-		return styles.fail.Render(truncate("error al actuar: "+describeError(m.actionErr), m.width)), true
+		return styles.FailPlain.Render(truncate("error al actuar: "+describeError(m.actionErr), m.width)), true
 	case m.unavailable():
-		return styles.fail.Render(truncate(unavailableText, m.width)), true
+		return styles.FailPlain.Render(truncate(unavailableText, m.width)), true
 	case m.loadingContainers && len(m.containers) == 0:
-		return styles.meta.Render("cargando…"), true
+		return styles.MetaPlain.Render("cargando…"), true
 	case m.err != nil && len(m.containers) == 0:
-		return styles.fail.Render(truncate("error: "+describeError(m.err), m.width)), true
+		return styles.FailPlain.Render(truncate("error: "+describeError(m.err), m.width)), true
 	case len(m.containers) == 0:
-		return styles.meta.Render(truncate("sin contenedores", m.width)), true
+		return styles.MetaPlain.Render(truncate("sin contenedores", m.width)), true
 	}
 
 	return "", false
@@ -55,7 +59,7 @@ func (m Model) bodyRows() []string {
 	for i := start; i < end; i++ {
 		line := truncate(m.rows[i], m.width)
 		if i == m.cursor {
-			line = styles.cursor.Render(line)
+			line = styles.CursorPlain.Render(line)
 		}
 
 		window = append(window, line)
@@ -90,13 +94,13 @@ func (m Model) footerText() string {
 // confirmLines renders the confirmation over the body of the panel.
 func (m Model) confirmLines() []string {
 	lines := make([]string, 0, m.bodyHeight()+footerRows)
-	lines = append(lines, styles.title.Render(truncate("confirmar · "+m.confirm.question(m.confirmName), m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate("confirmar · "+m.confirm.question(m.confirmName), m.width)))
 
 	if m.writing {
-		lines = append(lines, styles.meta.Render(truncate("actuando…", m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate("actuando…", m.width)))
 	}
 
-	lines = append(lines, styles.meta.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
@@ -113,9 +117,9 @@ func (m Model) logsView() string {
 	}
 
 	return strings.Join([]string{
-		styles.title.Render(truncate(m.logsTitle(), m.width)),
+		styles.TitlePlain.Render(truncate(m.logsTitle(), m.width)),
 		m.viewport.View(),
-		styles.meta.Render(truncate(footer, m.width)),
+		styles.MetaPlain.Render(truncate(footer, m.width)),
 	}, "\n")
 }
 

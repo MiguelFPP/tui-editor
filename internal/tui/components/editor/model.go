@@ -13,11 +13,11 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -57,23 +57,6 @@ type previewLoadedMsg struct {
 }
 
 var errNoService = errors.New("editor: servicio de archivos no configurado")
-
-var styles = struct {
-	title  lipgloss.Style
-	meta   lipgloss.Style
-	gutter lipgloss.Style
-	fail   lipgloss.Style
-}{
-	title:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	meta:   plainCells(lipgloss.NewStyle().Faint(true)),
-	gutter: plainCells(lipgloss.NewStyle().Faint(true)),
-	fail:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched: the viewport measures cells, not expanded tabs.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
 
 // Model is the editor/preview component; it never performs I/O outside a command.
 type Model struct {
@@ -224,7 +207,7 @@ func (m Model) View() string {
 			break
 		}
 		if m.saveErr != nil {
-			lines = append(lines, styles.fail.Render("error: "+describeError(m.saveErr)))
+			lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))
 		}
 
 		lines = append(lines, m.viewport.View())
@@ -329,16 +312,16 @@ func lineNumbers(total int) viewport.GutterFunc {
 
 	return func(ctx viewport.GutterContext) string {
 		if ctx.Soft {
-			return styles.gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
+			return styles.Gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
 		}
 
-		return styles.gutter.Render(fmt.Sprintf("%*d", digits, ctx.Index+1) + gutterSeparator)
+		return styles.Gutter.Render(fmt.Sprintf("%*d", digits, ctx.Index+1) + gutterSeparator)
 	}
 }
 
 // header is one line with the path, the mode and the state flags, cut to width.
 func (m Model) header() string {
-	return styles.title.Render(fitHeader(strings.Join(m.headerParts(), headerSeparator), m.width))
+	return styles.TitlePlain.Render(fitHeader(strings.Join(m.headerParts(), headerSeparator), m.width))
 }
 
 // headerParts keeps the path first, then the mode, then the state flags.
@@ -399,11 +382,11 @@ func (m Model) pathLabel() string {
 func (m Model) stateLine() (string, bool) {
 	switch {
 	case m.err != nil:
-		return styles.fail.Render("error: " + describeError(m.err)), true
+		return styles.FailPlain.Render("error: " + describeError(m.err)), true
 	case m.loading:
-		return styles.meta.Render("cargando…"), true
+		return styles.MetaPlain.Render("cargando…"), true
 	case m.content == "":
-		return styles.meta.Render("vacío"), true
+		return styles.MetaPlain.Render("vacío"), true
 	default:
 		return "", false
 	}
