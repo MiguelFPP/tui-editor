@@ -1197,6 +1197,7 @@ func (m *Model) applySides(msg sidesLoadedMsg) {
 		new:     msg.new.Text,
 		oldOK:   msg.oldErr == nil,
 		newOK:   msg.newErr == nil,
+		reason:  sidesReason(msg.oldErr, msg.newErr, msg.old, msg.new),
 	}
 
 	m.sync()

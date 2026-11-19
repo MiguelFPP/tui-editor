@@ -1,0 +1,16 @@
+git · rama main · 1 cambio
+Cambios │ Diff │ Ramas │ Stash │ Historial
+╭──────────────────────────────────────────────╮╭──────────────────────────────────────────────────────────────────────╮
+│Cambios · 1          …                        ││main.go · diff · hunk 1/1                                             │
+│.M main.go                          …         ││@@ -1,2 +1,2 @@                     …                                 │
+│                                              ││1  uno          …                                                     │
+│                                              ││2 -dos              …                                                 │
+│                                              ││resaltado aproximado en un lado · sin contenido               …       │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
+tab: sección · k / up/j / down: mover · L: columnas · H: lista · enter: diff del archivo · s: preparar · u: quitar · c:…

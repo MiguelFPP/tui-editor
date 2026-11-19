@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Diff partido con resaltado exacto desde el contenido real del archivo, con los
+  lados resueltos según `staged`.
+- Aviso de resaltado aproximado con el motivo cuando el archivo es binario, está
+  truncado o falta en la revisión.
+- Lectura de blobs por revisión (`git show :path` / `HEAD:path`) acotada a 1 MiB y
+  2000 líneas.
+
 ## [0.7.0] - 2026-11-19
 
 Two-column Git panel: framed columns, splitter, collapsible list and a

@@ -20,6 +20,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
 	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -370,6 +371,8 @@ type diffSides struct {
 	new     string
 	oldOK   bool
 	newOK   bool
+	// reason explains why a side lacks exact content, "" when both sides have it.
+	reason string
 }
 
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
@@ -992,7 +995,52 @@ func (m Model) diffRows() []string {
 		body = m.highlighted
 	}
 
-	return append([]string{header}, body...)
+	rows := append([]string{header}, body...)
+	if !m.diff.Binary && m.sidesMatchesDiff() {
+		if note := m.approxNote(); note != "" {
+			rows = append(rows, styles.MetaPlain.Render(truncate(note, m.previewWidth())))
+		}
+	}
+
+	return rows
+}
+
+// approxNote explains the approximate highlight, or "" when both sides are exact.
+func (m Model) approxNote() string {
+	if !m.sidesMatchesDiff() {
+		return ""
+	}
+	if m.sides.oldOK && m.sides.newOK && m.sides.reason == "" {
+		return ""
+	}
+
+	reason := m.sides.reason
+	if reason == "" {
+		reason = "sin contenido"
+	}
+	if m.sides.oldOK != m.sides.newOK {
+		return "resaltado aproximado en un lado · " + reason
+	}
+
+	return "resaltado aproximado · " + reason
+}
+
+// sidesReason explains why a side has no exact content, or "" when both sides do.
+func sidesReason(oldErr, newErr error, old, new domain.RevisionContent) string {
+	switch {
+	case oldErr == nil && newErr == nil && !old.Truncated && !new.Truncated:
+		return ""
+	case errors.Is(oldErr, domain.ErrBinary) || errors.Is(newErr, domain.ErrBinary):
+		return "binario"
+	case errors.Is(oldErr, domain.ErrNotFound) || errors.Is(newErr, domain.ErrNotFound):
+		return "sin contenido"
+	case oldErr != nil || newErr != nil:
+		return "sin contenido"
+	case old.Truncated || new.Truncated:
+		return "truncado"
+	default:
+		return ""
+	}
 }
 
 // hunkLabel describes the hunk cursor and the marks of the loaded diff.

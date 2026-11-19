@@ -1,13 +1,17 @@
 package gitpanel
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MiguelFPP/tui-editor/internal/domain"
 )
 
 // updateGold rewrites the golden files: make test-run PKG='./internal/tui/components/gitpanel/...' RUN=TestGolden -update.
@@ -15,8 +19,10 @@ var updateGold = flag.Bool("update", false, "reescribe los golden files de testd
 
 // The goldens fix the panel size so they never depend on the terminal of the environment.
 const (
-	goldenWidth  = 80
-	goldenHeight = 16
+	goldenWidth = 80
+	// goldenSplitWidth leaves the preview the cells the split diff needs.
+	goldenSplitWidth = 120
+	goldenHeight     = 16
 )
 
 // checkGolden compares the visible text of one view against its golden file.
@@ -80,6 +86,20 @@ func TestGoldenConflictBanner(t *testing.T) {
 	m.SetSize(goldenWidth, goldenHeight)
 
 	checkGolden(t, "conflict_banner.golden", plain(m.View()))
+}
+
+// TestGoldenApproxNotice pins the preview of a diff with one side missing.
+func TestGoldenApproxNotice(t *testing.T) {
+	git, files := panelWithSides(t, hunkDiff("uno", "dos", "DOS"), "uno\ndos\n", "uno\nDOS\n")
+	git.OnFileAt = func(context.Context, domain.FileRev, domain.RelPath) (domain.RevisionContent, error) {
+		return domain.RevisionContent{}, fmt.Errorf("git: FileAt: %w", domain.ErrNotFound)
+	}
+
+	m := openWithFiles(t, git, files)
+	m.SetSize(goldenSplitWidth, goldenHeight) // the preview only exists in the split layout
+	m = selectPath(t, m, "main.go")
+
+	checkGolden(t, "approx_notice.golden", plain(m.View()))
 }
 
 func TestGoldenStableAcrossRenders(t *testing.T) {
