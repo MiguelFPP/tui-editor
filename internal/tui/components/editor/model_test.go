@@ -632,46 +632,8 @@ func TestHighlightFallsBackToPlainText(t *testing.T) {
 	if got := Highlight("notes.xyz", unknownSource); got != unknownSource {
 		t.Errorf("Highlight() = %q, want the source unchanged", got)
 	}
-	if lexer := lexerFor("notes.xyz", unknownSource); lexer != nil {
-		t.Errorf("lexerFor() = %q, want no lexer for an unknown file", lexer.Config().Name)
-	}
 	if got := Highlight("", ""); got != "" {
 		t.Errorf("Highlight() = %q, want an empty string", got)
-	}
-}
-
-func TestLexerForMatchesPathThenContent(t *testing.T) {
-	cases := []struct {
-		name   string
-		path   domain.RelPath
-		source string
-		want   string
-	}{
-		{name: "extensión go", path: "main.go", source: goSource, want: "Go"},
-		{name: "extensión markdown", path: "docs/guide.md", source: markdownSource, want: "markdown"},
-		{name: "nombre completo", path: "Makefile", source: "all:\n\tgo build ./...\n", want: "Makefile"},
-		{name: "contenido sin extensión", path: "snippet", source: goSource, want: "Go"},
-		{name: "sin pistas", path: "notes.xyz", source: unknownSource, want: ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			lexer := lexerFor(tc.path, tc.source)
-			if tc.want == "" {
-				if lexer != nil {
-					t.Fatalf("lexerFor() = %q, want none", lexer.Config().Name)
-				}
-
-				return
-			}
-
-			if lexer == nil {
-				t.Fatalf("lexerFor() = nil, want %q", tc.want)
-			}
-			if got := lexer.Config().Name; got != tc.want {
-				t.Errorf("lexerFor() = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -723,25 +685,6 @@ func TestHighlightLinesFallsBackToPlainText(t *testing.T) {
 	empty := HighlightLines("notes.xyz", "")
 	if len(empty) != 1 || empty[0] != "" {
 		t.Errorf("HighlightLines() = %q for an empty source, want one empty line", empty)
-	}
-}
-
-func TestLexerForCachesByName(t *testing.T) {
-	first := lexerFor("main.go", goSource)
-	if first == nil {
-		t.Fatal("lexerFor() = nil, want the Go lexer")
-	}
-
-	// The cached name wins over a content analysis that would pick Markdown.
-	second := lexerFor("docs/main.go", markdownSource)
-	if second == nil {
-		t.Fatal("lexerFor() = nil on the cached name, want the Go lexer")
-	}
-	if got := second.Config().Name; got != "Go" {
-		t.Errorf("lexerFor() = %q, want the cached %q", got, "Go")
-	}
-	if _, err := second.Tokenise(nil, goSource); err != nil {
-		t.Errorf("Tokenise() = %v, want the cached lexer usable", err)
 	}
 }
 

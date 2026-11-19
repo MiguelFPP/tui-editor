@@ -231,6 +231,10 @@ type Model struct {
 	scrollList    int
 	scrollPreview int
 
+	// highlighted is the cached, coloured preview body; key tells which diff and width it belongs to.
+	highlighted  []string
+	highlightKey string
+
 	help bool
 }
 
@@ -463,10 +467,12 @@ func (m *Model) SetBounds(x, y, width, height int) {
 func (m *Model) sync() {
 	if !m.loaded {
 		m.diffBody, m.diffLines, m.hunkRows = "", nil, nil
+		m.highlighted, m.highlightKey = nil, ""
 	} else {
 		m.diffBody = common.RenderDiff(m.diff, m.width, true)
 		m.diffLines = strings.Split(m.diffBody, "\n")
 		m.hunkRows = diffSpans(m.diff)
+		m.highlighted, m.highlightKey = m.highlightedPreview(), m.highlightKeyFor()
 	}
 
 	m.split = m.splitNow()
@@ -478,6 +484,21 @@ func (m *Model) sync() {
 	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.previewRows()))
 
 	m.clamp(m.section)
+}
+
+// highlightKeyFor identifies the cached preview: the path, the mode and the width decide the lexer.
+func (m Model) highlightKeyFor() string {
+	return fmt.Sprintf("%s|%t|%d", m.request.Path, m.request.Staged, m.width)
+}
+
+// highlightedPreview colours the body of the diff once per key; a repeated render reuses it.
+func (m *Model) highlightedPreview() []string {
+	key := m.highlightKeyFor()
+	if m.highlightKey == key && len(m.highlighted) == len(m.diffLines) {
+		return m.highlighted
+	}
+
+	return common.HighlightDiffLines(m.request.Path, m.diffLines)
 }
 
 // splitNow reports whether the active section shows the list and the preview side by side.
@@ -676,7 +697,12 @@ func (m Model) diffRows() []string {
 		header += " · " + hunk
 	}
 
-	return append([]string{header}, m.diffLines...)
+	body := m.diffLines
+	if len(m.highlighted) == len(m.diffLines) {
+		body = m.highlighted
+	}
+
+	return append([]string{header}, body...)
 }
 
 // hunkLabel describes the hunk cursor and the marks of the loaded diff.
