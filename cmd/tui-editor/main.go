@@ -20,7 +20,7 @@ import (
 // version and commit are overridden at build time with
 // -ldflags "-X main.version=... -X main.commit=...".
 var (
-	version = "0.3.1"
+	version = "0.3.2"
 	commit  = "dev"
 )
 
