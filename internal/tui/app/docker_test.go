@@ -24,8 +24,8 @@ func TestDockerTabSwitchAndFocus(t *testing.T) {
 	if !strings.Contains(m.View().Content, "Docker") {
 		t.Errorf("View() = %q, want the Docker tab label", m.View().Content)
 	}
-	if m.dockerRect.Dx() != 120 {
-		t.Errorf("docker rect width = %d, want the full width", m.dockerRect.Dx())
+	if got, want := m.dockerRect.Dx()+2*borderSide, 120; got != want {
+		t.Errorf("docker frame width = %d, want the full width %d", got, want)
 	}
 
 	m, _ = press(t, m, typed('1'))

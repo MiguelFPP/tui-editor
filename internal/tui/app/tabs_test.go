@@ -179,8 +179,8 @@ func TestTabsClickOnDockerMirrorsTheKeyboard(t *testing.T) {
 	if m.Tab() != DockerTab || m.Focus() != FocusDocker {
 		t.Fatalf("tab/focus = %v/%v, want Docker/docker", m.Tab(), m.Focus())
 	}
-	if got := m.dockerRect.Dx(); got != 120 {
-		t.Errorf("docker rect width = %d, want the full width", got)
+	if got, want := m.dockerRect.Dx()+2*borderSide, 120; got != want {
+		t.Errorf("docker frame width = %d, want the full width %d", got, want)
 	}
 
 	// Leaving the tab stops the ticker: the click returns what the shortcut returns, no more.
@@ -209,7 +209,8 @@ func TestMouseClickOnTheFirstBodyRowStillFocusesThePanel(t *testing.T) {
 		t.Errorf("tab/focus = %v/%v, want Files/editor kept", m.Tab(), m.Focus())
 	}
 
-	m = update(t, m, click(tabMiddle(m, FilesTab), headerRows))
+	// The first row inside the frame is the first body row of the tree.
+	m = update(t, m, click(tabMiddle(m, FilesTab), headerRows+borderSide))
 	if m.Tab() != FilesTab {
 		t.Errorf("Tab() = %v, want the tab unchanged by a body click", m.Tab())
 	}

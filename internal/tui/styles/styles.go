@@ -17,8 +17,11 @@ func PlainCells(style lipgloss.Style) lipgloss.Style {
 	return style.TabWidth(lipgloss.NoTabConversion)
 }
 
-// Border frames an overlay.
+// Border frames an overlay or an unfocused panel.
 var Border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(ColorBorder))
+
+// BorderFocused frames the panel that owns the keyboard: the accent colour plus the statusbar cue.
+var BorderFocused = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(ColorAccent))
 
 // Help is the keymap overlay: the neutral frame plus its inner padding.
 var Help = Border.Padding(0, 2)

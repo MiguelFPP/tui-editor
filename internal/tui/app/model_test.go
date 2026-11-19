@@ -224,8 +224,8 @@ func TestModelWindowSize(t *testing.T) {
 	if m.treeRect.Dx() == 0 || m.editorRect.Dx() == 0 {
 		t.Errorf("panel rects = %v / %v, want both non-empty", m.treeRect, m.editorRect)
 	}
-	if m.gitRect.Dx() != 120 {
-		t.Errorf("git rect width = %d, want the full width", m.gitRect.Dx())
+	if got, want := m.gitRect.Dx()+2*borderSide, 120; got != want {
+		t.Errorf("git frame width = %d, want the full width %d", got, want)
 	}
 	if m.treeRect.Max.Y > m.height {
 		t.Errorf("tree rect %v exceeds the canvas", m.treeRect)
