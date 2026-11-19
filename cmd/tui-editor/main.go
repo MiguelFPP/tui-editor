@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -61,6 +62,27 @@ func run() error {
 	}
 	if cfg.ListKeys {
 		printKeys(os.Stdout)
+
+		return nil
+	}
+
+	// --init-config writes the template and exits; the path goes to stdout so it
+	// can be piped, and no repository, editor or Docker check runs.
+	if cfg.InitConfig {
+		if err := config.WriteDefault(cfg.ConfigPath, cfg.Force); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(os.Stdout, cfg.ConfigPath)
+
+		return nil
+	}
+
+	// --print-config dumps the resolved values without starting the TUI.
+	if cfg.PrintConfig {
+		if err := printConfig(os.Stdout, cfg); err != nil {
+			return err
+		}
 
 		return nil
 	}
@@ -163,4 +185,42 @@ func printKeys(w io.Writer) {
 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", binding.Action, binding.Scope, keys.Label(binding.Action), kind)
 	}
+}
+
+// printConfig writes the resolved configuration as indented JSON. It only reads
+// cfg: the theme is validated against the catalog but the palette and the
+// keymap are not applied, because no view is rendered.
+func printConfig(w io.Writer, cfg config.Config) error {
+	if w == nil {
+		w = io.Discard
+	}
+
+	name := strings.TrimSpace(cfg.Theme)
+	if name == "" {
+		name = styles.DefaultTheme().Name
+	}
+	if _, ok := styles.ThemeByName(name); !ok {
+		return fmt.Errorf("tema desconocido %q; disponibles: %s", name, strings.Join(styles.ThemeNames(), ", "))
+	}
+
+	// A fresh, never-nil map keeps the JSON stable: with no overrides the output
+	// is "keys": {} instead of null.
+	keys := make(map[string][]string, len(cfg.Keys))
+	for action, list := range cfg.Keys {
+		keys[action] = append([]string{}, list...)
+	}
+
+	out := struct {
+		ConfigPath string              `json:"config_path"`
+		Theme      string              `json:"theme"`
+		Keys       map[string][]string `json:"keys"`
+	}{ConfigPath: cfg.ConfigPath, Theme: name, Keys: keys}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(out); err != nil {
+		return fmt.Errorf("imprimir la configuración: %w", err)
+	}
+
+	return nil
 }

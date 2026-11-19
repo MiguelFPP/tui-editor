@@ -43,6 +43,9 @@ solo se puebla con `make dev-docker` (ver [Docker y socket](#docker-y-socket)).
 - **Temas y atajos configurables:** cuatro temas (Tokyo Night, Catppuccin Mocha,
   Dracula y Gruvbox Dark) y overrides de teclado mediante un `config.json` en
   XDG; `--list-themes` y `--list-keys` muestran los catálogos.
+- **Configuración a la vista:** `,` abre un overlay read-only con la ruta del
+  archivo, el tema activo y los overrides; `--init-config` y `--print-config`
+  escriben un archivo base o imprimen la configuración resuelta.
 - **Multiplataforma y bajo consumo:** binarios estáticos (`CGO_ENABLED=0`) para
   linux/darwin/windows en amd64 y arm64.
 
@@ -97,6 +100,7 @@ tui-editor/
 ├── README.md
 ├── SECURITY.md
 ├── compose.yaml
+├── config.example.json
 ├── go.mod
 └── go.sum
 ```
@@ -289,6 +293,9 @@ La precedencia es **flags > env > archivo > defaults**: el flag gana a la variab
 de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
 default.
 
+El repositorio incluye [`config.example.json`](config.example.json) como
+plantilla versionada con overrides de ejemplo; no se carga automáticamente.
+
 - Si el archivo por defecto **no existe, se ignora** sin error: arrancas con los
   defaults del registro.
 - Si `--config` o `TUI_EDITOR_CONFIG` apuntan a un archivo inexistente, es un
@@ -335,6 +342,32 @@ Sobre el bloque `keys`:
   configurables o fijas.
 - `--list-themes` imprime el catálogo y marca el default.
 
+### Archivo base
+
+```bash
+tui-editor --init-config
+tui-editor --init-config --force
+tui-editor --print-config
+```
+
+- `--init-config` escribe un archivo base mínimo (`theme: tokyonight-night`,
+  `keys: {}`) en la ruta resuelta (XDG o `--config`); no sobrescribe sin
+  `--force`.
+- `--print-config` imprime la configuración resuelta en JSON con `config_path`,
+  `theme` y `keys`; no arranca la TUI.
+- `config.example.json` es una plantilla con overrides de ejemplo; no se carga
+  automáticamente.
+
+### Configuración desde la TUI
+
+- `,` abre el overlay read-only.
+- Muestra el archivo cargado (o “sin archivo (defaults)”), el tema activo y el
+  número y la lista de overrides.
+- `,` o `esc` lo cierran; el ratón se ignora.
+- Es read-only: edita el archivo y reinicia para aplicar; no hay recarga en
+  caliente.
+- La tecla `,` es configurable como el resto de acciones (ID `config`).
+
 ### Temas
 
 | Nombre | Estilo Chroma | Descripción | Default |
@@ -373,6 +406,7 @@ salir.
 | clic en la pestaña | Cambiar de pestaña, con el mismo efecto que `1`/`2`/`3` |
 | `tab` / `shift+tab` | Alternar el foco en `Files`; cambiar de sección en `Git` |
 | `?` | Mostrar u ocultar la ayuda |
+| `,` | Ver la configuración (overlay read-only) |
 | `esc` | Cerrar la ayuda o reenviar la tecla al panel |
 | `q` / `ctrl+c` | Salir |
 
@@ -562,10 +596,13 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 | `--theme NAME` | `tokyonight-night` | Tema de color; `--list-themes` muestra los válidos |
 | `--list-themes` | — | Lista los temas disponibles y sale |
 | `--list-keys` | — | Lista las acciones, su scope, sus teclas por defecto y si son configurables, y sale |
+| `--init-config` | — | Escribe un archivo base y sale; no sobrescribe sin `--force` |
+| `--force` | — | Permite sobrescribir con `--init-config` |
+| `--print-config` | — | Imprime la configuración resuelta en JSON y sale |
 
 `--help` muestra el uso. Los errores de validación se imprimen en `stderr` y el
-proceso termina con código 1. `--version`, `--list-themes` y `--list-keys` no
-validan repositorio, editor ni Docker.
+proceso termina con código 1. `--version`, `--list-themes`, `--list-keys`,
+`--init-config` y `--print-config` no validan repositorio, editor ni Docker.
 
 ```bash
 docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version

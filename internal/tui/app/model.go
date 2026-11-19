@@ -108,7 +108,8 @@ type Model struct {
 	gitRect    image.Rectangle
 	dockerRect image.Rectangle
 
-	help bool
+	help       bool
+	configOpen bool
 
 	spinner  spinner.Model
 	spinning bool
@@ -228,6 +229,11 @@ func (m Model) HelpVisible() bool {
 	return m.help
 }
 
+// ConfigVisible reports whether the read-only configuration overlay is open.
+func (m Model) ConfigVisible() bool {
+	return m.configOpen
+}
+
 // fanOut delivers an async message to every child; each one ignores what it does not own.
 func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 4)
@@ -278,6 +284,19 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 
+	// The configuration overlay only answers to quit, to its own toggle and to esc.
+	if m.configOpen {
+		action, ok := m.keys.Match(keymap.ScopeRoot, key)
+		switch {
+		case ok && action == keymap.ActionQuit:
+			return m.quit()
+		case ok && action == keymap.ActionConfig, key == "esc":
+			m.configOpen = false
+		}
+
+		return nil, false
+	}
+
 	// The draft of the Files tab owns every key but ctrl+c, which never drops unsaved changes.
 	if m.tab == FilesTab && m.hasEditor && m.editor.CapturesInput() {
 		if key != "ctrl+c" {
@@ -315,6 +334,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.quit()
 	case keymap.ActionHelp:
 		m.help = true
+
+		return nil, false
+	case keymap.ActionConfig:
+		m.configOpen = true
 
 		return nil, false
 	case keymap.ActionTabFiles:
@@ -367,7 +390,7 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleClick routes a click to the top tabs first and then to the panel under the cursor.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
-	if m.help {
+	if m.help || m.configOpen {
 		return nil
 	}
 
@@ -386,7 +409,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 
 // handleWheel sends the wheel to the panel under the cursor, not to the focused one.
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
-	if m.help {
+	if m.help || m.configOpen {
 		return nil
 	}
 

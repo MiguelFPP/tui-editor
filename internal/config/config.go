@@ -14,12 +14,16 @@ import (
 
 // Config is the validated runtime configuration of the TUI. ConfigPath and Keys
 // come from the optional JSON file; Theme may stay empty for main to apply its
-// default. ListThemes and ListKeys ask main to print a catalog and exit, so no
-// other validation runs for them.
+// default. ShowVersion, ListThemes and ListKeys ask main to print a catalog and
+// exit; InitConfig writes a template and PrintConfig dumps the resolved values,
+// so no repo, editor or Docker validation runs for them.
 type Config struct {
 	ShowVersion bool
 	ListThemes  bool
 	ListKeys    bool
+	InitConfig  bool
+	Force       bool
+	PrintConfig bool
 	Repo        string
 	Editor      string
 	DockerHost  string
@@ -41,7 +45,10 @@ flags:
   --docker-host URL  Docker daemon endpoint, default: $DOCKER_HOST
   --debug-log FILE   debug log file, default: disabled
   --config FILE      archivo de configuración JSON, default: $XDG_CONFIG_HOME/tui-editor/config.json
-  --theme NAME       tema de color, default: tokyonight-night`
+  --theme NAME       tema de color, default: tokyonight-night
+  --init-config      escribe un archivo de configuración base y sale
+  --force            sobrescribe el archivo existente con --init-config
+  --print-config     imprime la configuración resuelta y sale`
 
 // ErrHelp reports that -h or --help was requested.
 var ErrHelp = flag.ErrHelp
@@ -83,6 +90,9 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	showVersion := flags.Bool("version", false, "muestra la versión y sale")
 	listThemes := flags.Bool("list-themes", false, "lista los temas disponibles y sale")
 	listKeys := flags.Bool("list-keys", false, "lista las acciones y sus teclas y sale")
+	initConfig := flags.Bool("init-config", false, "escribe un archivo de configuración base y sale")
+	force := flags.Bool("force", false, "sobrescribe el archivo existente con --init-config")
+	printConfig := flags.Bool("print-config", false, "imprime la configuración resuelta y sale")
 	repo := flags.String("repo", workDir, "directorio raíz del repositorio")
 	editor := flags.String("editor", editorDefault(getenv), "comando del editor externo")
 	dockerHost := flags.String("docker-host", strings.TrimSpace(getenv("DOCKER_HOST")), "endpoint del daemon Docker")
@@ -104,6 +114,32 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("argumento no esperado %q", flags.Arg(0))
 	}
 
+	// --init-config needs no existing file and wins over --print-config.
+	if *initConfig {
+		path, err := resolveInitPath(*configPath)
+		if err != nil {
+			return Config{}, err
+		}
+
+		return Config{InitConfig: true, Force: *force, ConfigPath: path}, nil
+	}
+	if *printConfig {
+		cfg, err := loadConfig(*configPath, *theme)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.PrintConfig = true
+
+		return cfg, nil
+	}
+
+	// The file is resolved before the repo, editor and Docker checks so the
+	// dump of --print-config and the TUI share the very same loading rules.
+	cfg, err := loadConfig(*configPath, *theme)
+	if err != nil {
+		return Config{}, err
+	}
+
 	editorCmd := strings.TrimSpace(*editor)
 	if editorCmd == "" {
 		return Config{}, ErrEditorRequired
@@ -119,32 +155,46 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 
-	path, explicit := resolveConfigPath(*configPath)
+	cfg.Repo = repoPath
+	cfg.Editor = editorCmd
+	cfg.DockerHost = host
+	cfg.DebugLog = strings.TrimSpace(*debugLog)
+
+	return cfg, nil
+}
+
+// loadConfig resolves the path, reads the JSON file and applies the theme
+// precedence: flag, then env (already folded into the flag default), then the
+// file. ConfigPath is only set when a file was actually loaded.
+func loadConfig(configPath, theme string) (Config, error) {
+	path, explicit := resolveConfigPath(configPath)
 	fileCfg, loaded, err := loadFile(path, explicit)
 	if err != nil {
 		return Config{}, err
 	}
 
-	// Theme precedence: flag, then env (already folded into the flag default),
-	// then the file.
-	effectiveTheme := strings.TrimSpace(*theme)
+	effectiveTheme := strings.TrimSpace(theme)
 	if effectiveTheme == "" {
 		effectiveTheme = strings.TrimSpace(fileCfg.Theme)
 	}
 
-	cfg := Config{
-		Repo:       repoPath,
-		Editor:     editorCmd,
-		DockerHost: host,
-		DebugLog:   strings.TrimSpace(*debugLog),
-		Theme:      effectiveTheme,
-		Keys:       fileCfg.keyOverrides(),
-	}
+	cfg := Config{Theme: effectiveTheme, Keys: fileCfg.keyOverrides()}
 	if loaded {
 		cfg.ConfigPath = path
 	}
 
 	return cfg, nil
+}
+
+// resolveInitPath returns the destination of --init-config. Unlike loadConfig it
+// never touches the filesystem, because the file is expected to be missing.
+func resolveInitPath(fromFlag string) (string, error) {
+	path, _ := resolveConfigPath(fromFlag)
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("%w: no se pudo resolver la ruta de destino; usa --config", ErrConfigFile)
+	}
+
+	return path, nil
 }
 
 func editorDefault(getenv func(string) string) string {

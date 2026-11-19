@@ -38,6 +38,7 @@ type Action string
 const (
 	ActionQuit      Action = "quit"
 	ActionHelp      Action = "help"
+	ActionConfig    Action = "config"
 	ActionTabFiles  Action = "tab_files"
 	ActionTabGit    Action = "tab_git"
 	ActionTabDocker Action = "tab_docker"
@@ -276,6 +277,7 @@ var catalog = []Binding{
 	// root
 	{Action: ActionQuit, Scope: ScopeRoot, Keys: []string{"q"}, FixedKeys: []string{"ctrl+c"}, Desc: "salir de la aplicación", Configurable: true},
 	{Action: ActionHelp, Scope: ScopeRoot, Keys: []string{"?"}, Desc: "abrir la ayuda", Configurable: true},
+	{Action: ActionConfig, Scope: ScopeRoot, Keys: []string{","}, Desc: "ver la configuración", Configurable: true},
 	{Action: ActionTabFiles, Scope: ScopeRoot, Keys: []string{"1"}, Desc: "pestaña de archivos", Configurable: true},
 	{Action: ActionTabGit, Scope: ScopeRoot, Keys: []string{"2"}, Desc: "pestaña de Git", Configurable: true},
 	{Action: ActionTabDocker, Scope: ScopeRoot, Keys: []string{"3"}, Desc: "pestaña de Docker", Configurable: true},

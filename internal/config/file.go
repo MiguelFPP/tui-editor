@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,89 @@ import (
 
 // maxConfigBytes bounds the configuration file size.
 const maxConfigBytes = 1 << 20
+
+// BaseFile is the template --init-config writes: a valid document with the
+// default theme and no key overrides. It always ends with a newline.
+const BaseFile = `{
+  "theme": "tokyonight-night",
+  "keys": {}
+}
+`
+
+// ErrConfigExists reports that the destination exists and --force was not given.
+var ErrConfigExists = errors.New("el archivo de configuración ya existe; usa --force")
+
+// WriteDefault writes BaseFile to path. It creates the parent directories, never
+// overwrites an existing file unless force is set and writes atomically, so an
+// interrupted run never leaves a partial file behind.
+func WriteDefault(path string, force bool) error {
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return fmt.Errorf("%w: ruta vacía", ErrConfigFile)
+	}
+
+	_, err := os.Stat(target)
+	switch {
+	case err == nil:
+		if !force {
+			return fmt.Errorf("%w: %s", ErrConfigExists, target)
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("%w: %s: %w", ErrConfigFile, target, err)
+	}
+
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("%w: no se pudo crear %s: %w", ErrConfigFile, dir, err)
+	}
+
+	return writeFileAtomic(target, BaseFile, force)
+}
+
+// writeFileAtomic writes data through a temporary file in the target directory:
+// the rename is atomic, so readers never see a half-written file.
+func writeFileAtomic(path, data string, replace bool) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrConfigFile, path, err)
+	}
+
+	name := tmp.Name()
+	// After a successful rename the temporary file no longer exists, so this
+	// cleanup only removes leftovers from a failed attempt.
+	defer func() { _ = os.Remove(name) }()
+
+	if _, err := tmp.WriteString(data); err != nil {
+		_ = tmp.Close()
+
+		return fmt.Errorf("%w: %s: %w", ErrConfigFile, name, err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+
+		return fmt.Errorf("%w: %s: %w", ErrConfigFile, name, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrConfigFile, name, err)
+	}
+
+	if err := os.Rename(name, path); err != nil {
+		if !replace {
+			return fmt.Errorf("%w: %s: %w", ErrConfigFile, path, err)
+		}
+
+		// Windows refuses to rename over an existing file: drop the destination
+		// and retry once.
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %s: %w", ErrConfigFile, path, err)
+		}
+		if err := os.Rename(name, path); err != nil {
+			return fmt.Errorf("%w: %s: %w", ErrConfigFile, path, err)
+		}
+	}
+
+	return nil
+}
 
 // fileConfig mirrors the JSON file; names and action IDs are validated later.
 type fileConfig struct {

@@ -21,6 +21,15 @@ Configurable themes and keybindings.
   scopes. `--list-keys` prints every action, its scope, its defaults and
   whether it can be overridden.
 - Help overlay, status bar and panel footers render the effective keys.
+- `config.example.json` template with an example theme and key overrides; it is
+  never loaded automatically.
+- `--init-config` writes a minimal base file (`theme: tokyonight-night`,
+  `keys: {}`) to the resolved path and exits; `--force` allows overwriting an
+  existing file.
+- `--print-config` prints the resolved configuration as JSON (`config_path`,
+  `theme`, `keys`) and exits without starting the TUI.
+- A global `config` action (default `,`) that opens a read-only overlay with the
+  loaded file, the active theme, the key overrides and a restart notice.
 
 ### Changed
 
@@ -29,6 +38,8 @@ Configurable themes and keybindings.
 - Key handling is centralized in `internal/tui/keymap`; components receive the
   registry through `Deps`.
 - Modal actions and `ctrl+c` remain fixed to avoid locking the user out.
+- The help overlay and the status bar list the new `config` action generated from
+  the registry.
 
 ### Fixed
 

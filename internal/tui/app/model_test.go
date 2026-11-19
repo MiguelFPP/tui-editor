@@ -555,7 +555,10 @@ func TestHelpTogglesWithTheQuestionMark(t *testing.T) {
 	}
 
 	view := m.View().Content
-	for _, want := range []string{"tui-editor · atajos", "1  pestaña de archivos", "tab  siguiente panel", "esc  cerrar la ayuda"} {
+	for _, want := range []string{
+		"tui-editor · atajos", "1  pestaña de archivos", "tab  siguiente panel",
+		"esc  cerrar la ayuda", ",  ver la configuración",
+	} {
 		if !strings.Contains(plainCells(view), want) {
 			t.Errorf("View() = %q, want %q", view, want)
 		}
@@ -585,6 +588,95 @@ func TestHelpSwallowsOtherKeys(t *testing.T) {
 	m = update(t, m, typed('2'))
 	if m.Tab() != FilesTab || !m.HelpVisible() {
 		t.Errorf("tab/help changed while the help was open: tab=%v help=%v", m.Tab(), m.HelpVisible())
+	}
+}
+
+func TestDefaultKeymapIncludesConfig(t *testing.T) {
+	if action, ok := keymap.Default().Match(keymap.ScopeRoot, ","); !ok || action != keymap.ActionConfig {
+		t.Errorf("Match(root, %q) = (%q, %v), want (%q, true)", ",", action, ok, keymap.ActionConfig)
+	}
+}
+
+func TestConfigOverlayOpensClosesAndShowsData(t *testing.T) {
+	deps := testDeps(t)
+	deps.Config.ConfigPath = "/tmp/tui-editor/config.json"
+	deps.Config.Keys = map[string][]string{"tree_down": {"n"}, "docker_logs": {"o"}}
+
+	m := New(deps)
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the , key to open the overlay")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{"/tmp/tui-editor/config.json", "overrides: 2", "tree_down", "docker_logs", "reinicia"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+
+	m, _ = press(t, m, key(tea.KeyEscape))
+	if m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = true, want esc to close the overlay")
+	}
+}
+
+func TestConfigOverlayWithoutFile(t *testing.T) {
+	deps := testDeps(t)
+	deps.Config.ConfigPath = ""
+	deps.Config.Keys = nil
+
+	m := New(deps)
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the overlay open")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{"sin archivo (defaults)", "sin overrides"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+}
+
+func TestConfigOverlayIgnoresMouse(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "main.go")
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the overlay open")
+	}
+
+	m = update(t, m, click(tabMiddle(m, DockerTab), tabRow))
+	if m.Tab() != FilesTab || m.Focus() != FocusEditor {
+		t.Errorf("tab/focus = %v/%v, want Files/editor kept while the overlay is open", m.Tab(), m.Focus())
+	}
+
+	m = update(t, m, wheel(tea.MouseWheelDown, m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+	if m.Focus() != FocusEditor {
+		t.Errorf("Focus() = %v, want editor kept on a wheel while the overlay is open", m.Focus())
+	}
+}
+
+func TestConfigActionCanBeReassigned(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"config": {"F2"}})
+
+	m := newSized(t, deps, 120, 40)
+	m, _ = press(t, m, key(tea.KeyF2))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the reassigned F2 to open the overlay")
+	}
+
+	// The default key is replaced, not added.
+	fresh := newSized(t, deps, 120, 40)
+	fresh, _ = press(t, fresh, typed(','))
+	if fresh.ConfigVisible() {
+		t.Error("ConfigVisible() = true after ,, want the default key replaced")
 	}
 }
 

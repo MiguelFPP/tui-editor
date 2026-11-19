@@ -8,7 +8,7 @@ import (
 
 // expectedActions is the catalog in display order; it also fixes the size.
 var expectedActions = []Action{
-	ActionQuit, ActionHelp, ActionTabFiles, ActionTabGit, ActionTabDocker, ActionFocusNext, ActionFocusPrev,
+	ActionQuit, ActionHelp, ActionConfig, ActionTabFiles, ActionTabGit, ActionTabDocker, ActionFocusNext, ActionFocusPrev,
 
 	ActionTreeUp, ActionTreeDown, ActionTreePageUp, ActionTreePageDown, ActionTreeHome, ActionTreeEnd,
 	ActionTreeExpand, ActionTreeCollapse, ActionTreeActivate, ActionTreeFilter, ActionTreeClearFilter,
@@ -164,6 +164,7 @@ func TestMatchResolvesInsideEachScope(t *testing.T) {
 		{name: "docker enter", scope: ScopeDocker, key: "enter", want: ActionDockerStats},
 		{name: "docker l", scope: ScopeDocker, key: "l", want: ActionDockerLogs},
 		{name: "root help", scope: ScopeRoot, key: "?", want: ActionHelp},
+		{name: "root config", scope: ScopeRoot, key: ",", want: ActionConfig},
 		{name: "git help", scope: ScopeGit, key: "?", want: ActionGitHelp},
 		{name: "tree clear filter", scope: ScopeTree, key: "esc", want: ActionTreeClearFilter},
 		{name: "git back", scope: ScopeGit, key: "esc", want: ActionGitBack},
@@ -465,8 +466,8 @@ func TestAllAndConfigurableReturnCopiesAndCounts(t *testing.T) {
 	}
 
 	configurable := registry.Configurable()
-	if len(configurable) != 59 {
-		t.Errorf("Configurable() = %d bindings, want 59", len(configurable))
+	if len(configurable) != 60 {
+		t.Errorf("Configurable() = %d bindings, want 60", len(configurable))
 	}
 	for _, binding := range configurable {
 		if !binding.Configurable {
