@@ -66,7 +66,7 @@ func testDeps(t *testing.T) Deps {
 	}
 
 	docker := fakes.NewDockerService()
-	docker.OnContainers = func(context.Context) ([]domain.ContainerSummary, error) {
+	docker.OnContainers = func(context.Context, domain.ContainerScope) ([]domain.ContainerSummary, error) {
 		return []domain.ContainerSummary{
 			{ID: "aaaaaaaaaaaaaaaa", Name: "web", Image: "nginx:latest", State: domain.ContainerRunning},
 		}, nil

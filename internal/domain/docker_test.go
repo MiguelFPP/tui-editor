@@ -186,3 +186,81 @@ func TestDockerEventKindsAreDistinct(t *testing.T) {
 		t.Errorf("DockerEventUnknown = %d, want the zero value", DockerEventUnknown)
 	}
 }
+
+func TestContainerSummaryInScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		container ContainerSummary
+		scope     ContainerScope
+		want      bool
+	}{
+		{
+			name:      "zero scope lists everything",
+			container: ContainerSummary{ID: "a"},
+			scope:     ContainerScope{},
+			want:      true,
+		},
+		{
+			name:      "working_dir match",
+			container: ContainerSummary{WorkingDir: "/repo/proj"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj"},
+			want:      true,
+		},
+		{
+			name:      "working_dir match ignores a trailing slash",
+			container: ContainerSummary{WorkingDir: "/repo/proj/"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj"},
+			want:      true,
+		},
+		{
+			name:      "working_dir mismatch",
+			container: ContainerSummary{WorkingDir: "/repo/other"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj"},
+			want:      false,
+		},
+		{
+			name:      "project fallback when working_dir is missing",
+			container: ContainerSummary{Project: "proj"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj", Project: "proj"},
+			want:      true,
+		},
+		{
+			name:      "project fallback mismatch",
+			container: ContainerSummary{Project: "other"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj", Project: "proj"},
+			want:      false,
+		},
+		{
+			name:      "container without compose labels",
+			container: ContainerSummary{ID: "a"},
+			scope:     ContainerScope{WorkingDir: "/repo/proj"},
+			want:      false,
+		},
+		{
+			name:      "windows label compares across separators",
+			container: ContainerSummary{WorkingDir: `C:\repo\proj`},
+			scope:     ContainerScope{WorkingDir: "C:/repo/proj"},
+			want:      true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.container.InScope(tc.scope); got != tc.want {
+				t.Errorf("InScope() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestContainerScopeFiltered(t *testing.T) {
+	if (ContainerScope{}).Filtered() {
+		t.Error("the zero scope must not filter")
+	}
+	if !(ContainerScope{WorkingDir: "/repo"}).Filtered() {
+		t.Error("a working_dir scope must filter")
+	}
+	if !(ContainerScope{Project: "proj"}).Filtered() {
+		t.Error("a project scope must filter")
+	}
+}

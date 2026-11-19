@@ -43,10 +43,19 @@ func (m Model) stateLine() (string, bool) {
 	case m.err != nil && len(m.containers) == 0:
 		return styles.FailPlain.Render(truncate("error: "+describeError(m.err), m.width)), true
 	case len(m.containers) == 0:
-		return styles.MetaPlain.Render(truncate("sin contenedores", m.width)), true
+		return styles.MetaPlain.Render(truncate(m.emptyText(), m.width)), true
 	}
 
 	return "", false
+}
+
+// emptyText explains an empty list, naming the scope and the key that widens it.
+func (m Model) emptyText() string {
+	if m.showAll || m.repoRoot == "" {
+		return "sin contenedores"
+	}
+
+	return "sin contenedores de este proyecto · a: ver todos"
 }
 
 // bodyRows renders the visible window of the container table.
@@ -82,6 +91,7 @@ func (m Model) footerText() string {
 		"j/k: mover",
 		"enter: stats",
 		"l: logs",
+		m.scopeHint(),
 		"s: start",
 		"x: stop",
 		"R: restart",

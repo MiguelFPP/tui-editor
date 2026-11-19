@@ -16,7 +16,7 @@ type DockerService struct {
 	recorder
 
 	OnPing       func(ctx context.Context) error
-	OnContainers func(ctx context.Context) ([]domain.ContainerSummary, error)
+	OnContainers func(ctx context.Context, scope domain.ContainerScope) ([]domain.ContainerSummary, error)
 	OnStats      func(ctx context.Context, id string) (domain.ContainerStats, error)
 	OnLogs       func(ctx context.Context, id string, opts domain.LogOptions) (domain.LogPage, error)
 	OnStart      func(ctx context.Context, id string) error
@@ -60,13 +60,13 @@ func (d *DockerService) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (d *DockerService) Containers(ctx context.Context) ([]domain.ContainerSummary, error) {
-	d.record("Containers")
+func (d *DockerService) Containers(ctx context.Context, scope domain.ContainerScope) ([]domain.ContainerSummary, error) {
+	d.record("Containers", scope)
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("Containers: %w", err)
 	}
 	if fn := hook(&d.recorder, &d.OnContainers); fn != nil {
-		return fn(ctx)
+		return fn(ctx, scope)
 	}
 
 	return nil, nil

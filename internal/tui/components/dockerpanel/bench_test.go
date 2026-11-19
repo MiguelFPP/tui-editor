@@ -12,7 +12,7 @@ import (
 // does not allocate: the guard returns before any Docker call or new timer is built.
 func BenchmarkInactiveTickNoPoll(b *testing.B) {
 	docker := fakes.NewDockerService()
-	m := New(docker)
+	m := New(docker, "")
 	m.interval = 0
 	m.SetSize(100, 24)
 

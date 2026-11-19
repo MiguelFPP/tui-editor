@@ -17,7 +17,7 @@ import (
 
 // testModel builds a panel of a fixed size; the ticker is shortened so a batch never waits.
 func testModel(docker ports.DockerService) Model {
-	m := New(docker)
+	m := New(docker, "")
 	m.interval = 0
 	m.SetSize(100, 24)
 
@@ -210,7 +210,7 @@ func TestDebounceOnePollPerTick(t *testing.T) {
 		t.Fatalf("defaultTickInterval = %v, want 1s", defaultTickInterval)
 	}
 
-	fresh := New(fakes.NewDockerService())
+	fresh := New(fakes.NewDockerService(), "")
 	if fresh.interval != time.Second {
 		t.Errorf("interval = %v, want 1s by default", fresh.interval)
 	}
@@ -507,7 +507,7 @@ func TestActionsWithoutService(t *testing.T) {
 
 func TestUnavailableShowsActionableState(t *testing.T) {
 	docker := fakes.NewDockerService()
-	docker.OnContainers = func(context.Context) ([]domain.ContainerSummary, error) {
+	docker.OnContainers = func(context.Context, domain.ContainerScope) ([]domain.ContainerSummary, error) {
 		return nil, domain.ErrDockerUnavailable
 	}
 
@@ -651,5 +651,121 @@ func TestCapturesInputWithLogsAndConfirm(t *testing.T) {
 	logs := openLogs(t, m)
 	if !logs.CapturesInput() {
 		t.Error("the logs must capture the input")
+	}
+}
+
+// scoped builds a panel bound to a repo root and applies one container page.
+func scoped(t *testing.T, root string, containers []domain.ContainerSummary) Model {
+	t.Helper()
+
+	m := New(fakes.NewDockerService(), root)
+	m.interval = 0
+	m.SetSize(100, 24)
+	m.SetActive(true)
+
+	return feed(t, m, containersMsg{seq: m.containersSeq, containers: containers})
+}
+
+func TestScopeDefaultsToProject(t *testing.T) {
+	m := scoped(t, "/repo/proj", sampleContainers())
+
+	if m.showAll {
+		t.Error("the panel must start scoped to the project")
+	}
+	if m.scope.WorkingDir != "/repo/proj" || m.scope.Project != "proj" {
+		t.Errorf("scope = %+v, want the repo root and its base name", m.scope)
+	}
+}
+
+func TestScopeUnknownRootListsEverything(t *testing.T) {
+	m := scoped(t, "", sampleContainers())
+
+	if !m.showAll {
+		t.Error("an unknown root must list every container")
+	}
+	if m.scope.Filtered() {
+		t.Errorf("scope = %+v, want the zero scope", m.scope)
+	}
+}
+
+func TestScopeToggleSwitchesAndReloads(t *testing.T) {
+	m := scoped(t, "/repo/proj", sampleContainers())
+	before := m.containersSeq
+
+	m, cmd := m.Update(typed('a'))
+	if cmd == nil {
+		t.Fatal("a: no command, want a reload")
+	}
+	if !m.showAll {
+		t.Error("a: showAll = false, want true")
+	}
+	if m.scope.Filtered() {
+		t.Error("a: the scope must widen to everything")
+	}
+	if m.containersSeq != before+1 {
+		t.Errorf("a: containersSeq = %d, want %d", m.containersSeq, before+1)
+	}
+
+	m, _ = m.Update(typed('a'))
+	if m.showAll {
+		t.Error("a again: showAll = true, want false")
+	}
+	if m.scope.WorkingDir != "/repo/proj" {
+		t.Errorf("a again: scope = %+v, want the repo root", m.scope)
+	}
+}
+
+func TestScopeToggleKeepsTheSelectedContainer(t *testing.T) {
+	m := scoped(t, "/repo/proj", sampleContainers())
+	m.cursor = 1
+
+	m, _ = m.Update(typed('a'))
+	m = feed(t, m, containersMsg{seq: m.containersSeq, containers: sampleContainers()})
+
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want the container that was selected", m.cursor)
+	}
+}
+
+func TestScopeToggleWithoutRootIsInert(t *testing.T) {
+	m := scoped(t, "", sampleContainers())
+
+	m, cmd := m.Update(typed('a'))
+	if cmd != nil {
+		t.Error("a: without a root the toggle must not reload")
+	}
+	if !m.showAll {
+		t.Error("a: the mode must stay on every container")
+	}
+}
+
+func TestScopeTitleAndFooterNameTheMode(t *testing.T) {
+	m := scoped(t, "/repo/proj", sampleContainers())
+
+	if !strings.Contains(m.titleText(), "alcance: proyecto") {
+		t.Errorf("title = %q, want the project scope", m.titleText())
+	}
+	if !strings.Contains(m.footerText(), "a: ver todos") {
+		t.Errorf("footer = %q, want the key that widens the scope", m.footerText())
+	}
+
+	m, _ = m.Update(typed('a'))
+	if !strings.Contains(m.titleText(), "alcance: todos") {
+		t.Errorf("title = %q, want every container", m.titleText())
+	}
+	if !strings.Contains(m.footerText(), "a: ver proyecto") {
+		t.Errorf("footer = %q, want the key that narrows the scope", m.footerText())
+	}
+}
+
+func TestScopeEmptyStateExplainsTheProjectMode(t *testing.T) {
+	m := scoped(t, "/repo/proj", nil)
+
+	line, ok := m.stateLine()
+	if !ok {
+		t.Fatal("stateLine() = no line, want an explanation")
+	}
+	if !strings.Contains(line, "este proyecto") {
+		t.Errorf("stateLine() = %q, want the project hint", line)
 	}
 }

@@ -14,8 +14,8 @@ import (
 // maxStartProbes bounds the inspects used to fill StartedAt, which the list API does not return.
 const maxStartProbes = 16
 
-// Containers lists every container sorted by name.
-func (s *Service) Containers(ctx context.Context) ([]domain.ContainerSummary, error) {
+// Containers lists the containers in scope, sorted by name.
+func (s *Service) Containers(ctx context.Context, scope domain.ContainerScope) ([]domain.ContainerSummary, error) {
 	ctx, cancel := s.withTimeout(ctx, listTimeout)
 	defer cancel()
 
@@ -28,6 +28,10 @@ func (s *Service) Containers(ctx context.Context) ([]domain.ContainerSummary, er
 	probes := 0
 	for _, item := range res.Items {
 		summary := containerSummary(item)
+		// One label key per filter; the scope needs working_dir plus the project fallback.
+		if !summary.InScope(scope) {
+			continue
+		}
 		if summary.State == domain.ContainerRunning && probes < maxStartProbes {
 			probes++
 			summary.StartedAt = s.startedAt(ctx, item.ID)
@@ -60,13 +64,15 @@ func (s *Service) startedAt(ctx context.Context, id string) time.Time {
 // containerSummary maps one row of the daemon list onto the domain summary.
 func containerSummary(item container.Summary) domain.ContainerSummary {
 	return domain.ContainerSummary{
-		ID:        item.ID,
-		Name:      containerName(item.Names),
-		Image:     item.Image,
-		State:     containerState(item.State),
-		Health:    healthState(item.Health),
-		Ports:     portMappings(item.Ports),
-		CreatedAt: time.Unix(item.Created, 0).UTC(),
+		ID:         item.ID,
+		Name:       containerName(item.Names),
+		Image:      item.Image,
+		State:      containerState(item.State),
+		Health:     healthState(item.Health),
+		Ports:      portMappings(item.Ports),
+		CreatedAt:  time.Unix(item.Created, 0).UTC(),
+		Project:    item.Labels[domain.LabelComposeProject],
+		WorkingDir: item.Labels[domain.LabelComposeWorkingDir],
 	}
 }
 

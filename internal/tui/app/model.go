@@ -127,7 +127,7 @@ func New(deps Deps) Model {
 		editors:  deps.Editor,
 		tree:     filetree.New(deps.Files, ""),
 		git:      gitpanel.New(deps.Git),
-		docker:   dockerpanel.New(deps.Docker),
+		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo),
 		tab:      FilesTab,
 		focus:    FocusTree,
 		width:    defaultWidth,
