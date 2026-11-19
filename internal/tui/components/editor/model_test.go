@@ -18,6 +18,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const (
@@ -99,11 +100,23 @@ func editorsFake() *fakes.EditorService {
 	return editors
 }
 
+// overrideKeys returns the default registry with the overrides applied on top of it.
+func overrideKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
+}
+
 // open runs Init, feeds its message back and returns the loaded model.
 func open(t *testing.T, path domain.RelPath, width, height int) Model {
 	t.Helper()
 
-	m := New(filesFake(t), editorsFake(), path)
+	m := New(filesFake(t), editorsFake(), path, keymap.Default())
 	m.SetSize(width, height)
 
 	cmd := m.Init()
@@ -185,7 +198,7 @@ func checkGolden(t *testing.T, name, got string) {
 
 func TestPreviewLoadsFileThroughThePort(t *testing.T) {
 	files := filesFake(t)
-	m := New(files, editorsFake(), "main.go")
+	m := New(files, editorsFake(), "main.go", keymap.Default())
 	m.SetSize(goldenWidth, 10)
 
 	if !m.loading {
@@ -411,7 +424,7 @@ func TestPreviewErrorStates(t *testing.T) {
 }
 
 func TestPreviewMissingServiceReportsAnError(t *testing.T) {
-	m := New(nil, nil, "main.go")
+	m := New(nil, nil, "main.go", keymap.Default())
 	m.SetSize(goldenWidth, goldenHeight)
 
 	cmd := m.Init()
@@ -460,7 +473,7 @@ func TestPreviewTruncatedFileIsMarked(t *testing.T) {
 }
 
 func TestPreviewIgnoresResultsOfAnotherPath(t *testing.T) {
-	m := New(filesFake(t), editorsFake(), "main.go")
+	m := New(filesFake(t), editorsFake(), "main.go", keymap.Default())
 	m.SetSize(goldenWidth, goldenHeight)
 
 	next, cmd := m.Update(previewLoadedMsg{path: "notes.xyz", content: domain.FileContent{Path: "notes.xyz", Text: unknownSource}})
@@ -754,7 +767,7 @@ func TestLexerCacheIsSafeForConcurrentRendering(t *testing.T) {
 }
 
 func TestLoadingAndErrReportTheReadState(t *testing.T) {
-	pending := New(filesFake(t), editorsFake(), "main.go")
+	pending := New(filesFake(t), editorsFake(), "main.go", keymap.Default())
 	if !pending.Loading() {
 		t.Error("Loading() = false before Init, want true")
 	}

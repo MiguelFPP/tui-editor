@@ -1,0 +1,9 @@
+{
+  "theme": "catppuccin-mocha",
+  "keys": {
+    "help": ["h"],
+    "tree_down": ["n"],
+    "git_section_next": ["g"],
+    "docker_logs": ["o"]
+  }
+}

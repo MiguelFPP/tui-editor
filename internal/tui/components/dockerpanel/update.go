@@ -10,6 +10,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // Update applies one message; every read and every action goes through a command, never inline.
@@ -101,7 +102,8 @@ func (m *Model) onTick(msg tickMsg) tea.Cmd {
 	return tea.Batch(commands...)
 }
 
-// handleKey routes the confirmation and the logs first, then the container list.
+// handleKey routes the confirmation and the logs first, then resolves the key against the Docker
+// scope of the registry.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case m.confirm != confirmNone:
@@ -110,32 +112,37 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleLogsKey(msg)
 	}
 
-	switch msg.String() {
-	case "j", "down":
-		m.moveCursor(1)
-	case "k", "up":
+	action, ok := m.keys.Match(keymap.ScopeDocker, msg.String())
+	if !ok {
+		return nil
+	}
+
+	switch action {
+	case keymap.ActionDockerUp:
 		m.moveCursor(-1)
-	case "pgdown":
+	case keymap.ActionDockerDown:
+		m.moveCursor(1)
+	case keymap.ActionDockerPageDown:
 		m.moveCursor(m.bodyHeight())
-	case "pgup":
+	case keymap.ActionDockerPageUp:
 		m.moveCursor(-m.bodyHeight())
-	case "home":
+	case keymap.ActionDockerHome:
 		m.moveCursor(-len(m.containers))
-	case "end":
+	case keymap.ActionDockerEnd:
 		m.moveCursor(len(m.containers))
-	case "enter":
+	case keymap.ActionDockerStats:
 		return m.loadStats()
-	case "l":
+	case keymap.ActionDockerLogs:
 		return m.openLogs()
-	case "s":
+	case keymap.ActionDockerStart:
 		return m.openConfirm(confirmStart)
-	case "x":
+	case keymap.ActionDockerStop:
 		return m.openConfirm(confirmStop)
-	case "R":
+	case keymap.ActionDockerRestart:
 		return m.openConfirm(confirmRestart)
-	case "r":
+	case keymap.ActionDockerRefresh:
 		return m.refresh()
-	case "a":
+	case keymap.ActionDockerScopeToggle:
 		return m.toggleScope()
 	}
 
@@ -179,10 +186,15 @@ func (m *Model) refresh() tea.Cmd {
 
 // handleConfirmKey resolves a confirmation: y or enter accepts, n or esc cancels.
 func (m *Model) handleConfirmKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "y", "enter":
+	action, ok := m.keys.Match(keymap.ScopeDockerConfirm, msg.String())
+	if !ok {
+		return nil // every other key is ignored: the confirmation keeps the focus
+	}
+
+	switch action {
+	case keymap.ActionDockerConfirmYes:
 		return m.submitConfirm()
-	case "n", "esc":
+	case keymap.ActionDockerConfirmNo:
 		if m.writing {
 			return nil
 		}
@@ -239,27 +251,32 @@ func (m *Model) submitConfirm() tea.Cmd {
 
 // handleLogsKey scrolls the loaded logs; scrolling up at the top loads the previous page.
 func (m *Model) handleLogsKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
+	action, ok := m.keys.Match(keymap.ScopeDockerLogs, msg.String())
+	if !ok {
+		return nil
+	}
+
+	switch action {
+	case keymap.ActionDockerLogsClose:
 		m.closeLogs()
-	case "r":
+	case keymap.ActionDockerLogsReload:
 		m.logsBefore = time.Time{}
 		m.logs = domain.LogPage{}
 		m.renderLogs()
 		m.viewport.GotoTop()
 
 		return m.loadLogs()
-	case "j", "down":
-		m.viewport.ScrollDown(1)
-	case "k", "up":
+	case keymap.ActionDockerLogsUp:
 		return m.scrollLogsUp(1)
-	case "pgdown":
+	case keymap.ActionDockerLogsDown:
+		m.viewport.ScrollDown(1)
+	case keymap.ActionDockerLogsPageDown:
 		m.viewport.PageDown()
-	case "pgup":
+	case keymap.ActionDockerLogsPageUp:
 		return m.scrollLogsUp(m.viewport.Height())
-	case "home":
+	case keymap.ActionDockerLogsHome:
 		m.viewport.GotoTop()
-	case "end":
+	case keymap.ActionDockerLogsEnd:
 		m.viewport.GotoBottom()
 	}
 

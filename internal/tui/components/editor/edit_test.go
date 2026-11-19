@@ -13,6 +13,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const (
@@ -78,7 +79,14 @@ func newDraft() *draft {
 func (fx *draft) open(t *testing.T) Model {
 	t.Helper()
 
-	m := New(fx.files, fx.editors, draftPath)
+	return fx.openWith(t, keymap.Default())
+}
+
+// openWith loads the draft fixture with a custom keymap.
+func (fx *draft) openWith(t *testing.T, keys keymap.Registry) Model {
+	t.Helper()
+
+	m := New(fx.files, fx.editors, draftPath, keys)
 	m.SetSize(draftWidth, draftHeight)
 
 	return apply(t, m, run(t, m.Init()))
@@ -214,6 +222,66 @@ func TestEditEntersTheDraftAndCapturesInput(t *testing.T) {
 	}
 	if view := visible(m.View()); !strings.Contains(view, "sin guardar") {
 		t.Errorf("View() = %q, want the pending-changes marker", view)
+	}
+}
+
+// TestEditKeymapOverrideOpensTheDraft checks that the override replaces the default key.
+func TestEditKeymapOverrideOpensTheDraft(t *testing.T) {
+	fx := newDraft()
+	m := fx.openWith(t, overrideKeys(t, map[string][]string{"editor_edit": {"o"}}))
+
+	// e is no longer bound to the quick edit mode.
+	m, _ = press(t, m, typed('e'))
+	if m.editing || m.CapturesInput() {
+		t.Fatal("e entered the draft, want the default key replaced")
+	}
+
+	m, cmd := press(t, m, typed('o'))
+	if cmd == nil {
+		t.Error("no command, want the focus of the draft")
+	}
+	if !m.editing || !m.CapturesInput() {
+		t.Fatalf("editing = %v, CapturesInput() = %v, want the draft open", m.editing, m.CapturesInput())
+	}
+	if got := m.area.Value(); got != draftSource {
+		t.Errorf("draft = %q, want the file text", got)
+	}
+}
+
+// TestSaveKeymapOverride checks that the save shortcut can be reassigned.
+func TestSaveKeymapOverride(t *testing.T) {
+	fx := newDraft()
+	m := fx.openWith(t, overrideKeys(t, map[string][]string{"editor_save": {"ctrl+w"}}))
+	m = send(t, m, typed('e'))
+	m = send(t, m, typed('X'))
+
+	// ctrl+s is no longer a save key: the draft is left untouched.
+	m, _ = press(t, m, ctrlS)
+	if m.saving {
+		t.Error("ctrl+s started a save, want the default key replaced")
+	}
+	if got := fx.files.CallCount("WriteFile"); got != 0 {
+		t.Fatalf("WriteFile calls = %d after ctrl+s, want 0", got)
+	}
+	if !m.Dirty() {
+		t.Error("Dirty() = false, want the draft kept")
+	}
+
+	m, cmd := press(t, m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("no command, want the write")
+	}
+
+	m = apply(t, m, run(t, cmd))
+
+	if got := fx.files.CallCount("WriteFile"); got != 1 {
+		t.Errorf("WriteFile calls = %d after ctrl+w, want 1", got)
+	}
+	if m.Dirty() || m.saving {
+		t.Errorf("dirty/saving = %v/%v after the save, want false/false", m.Dirty(), m.saving)
+	}
+	if fx.disk != "X"+draftSource {
+		t.Errorf("disk = %q, want the saved draft", fx.disk)
 	}
 }
 
@@ -678,7 +746,7 @@ func TestExternalReportsAMissingEditor(t *testing.T) {
 
 func TestExternalWithoutAnEditorServiceReportsAnError(t *testing.T) {
 	fx := newDraft()
-	m := New(fx.files, nil, draftPath)
+	m := New(fx.files, nil, draftPath, keymap.Default())
 	m.SetSize(draftWidth, draftHeight)
 	m = apply(t, m, run(t, m.Init()))
 

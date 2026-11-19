@@ -15,6 +15,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // tree is the fake repository layout shared by every test.
@@ -88,7 +89,28 @@ func drain(t *testing.T, m Model, cmd tea.Cmd) Model {
 func loadRoot(t *testing.T, files ports.FileService) Model {
 	t.Helper()
 
-	m := New(files, "")
+	m := New(files, "", keymap.Default())
+
+	return drain(t, m, m.Init())
+}
+
+// overrideKeys returns the default registry with the overrides applied on top of it.
+func overrideKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
+}
+
+// loadRootWith loads the root listing of a tree driven by a custom keymap.
+func loadRootWith(t *testing.T, files ports.FileService, keys keymap.Registry) Model {
+	t.Helper()
+
+	m := New(files, "", keys)
 
 	return drain(t, m, m.Init())
 }
@@ -318,6 +340,37 @@ func selectRow(t *testing.T, m Model, path domain.RelPath) Model {
 	return m
 }
 
+// TestKeymapOverrideMovesTheCursor checks that an override replaces the default key.
+func TestKeymapOverrideMovesTheCursor(t *testing.T) {
+	keys := overrideKeys(t, map[string][]string{"tree_down": {"n"}})
+
+	m := loadRootWith(t, treeFake(t), keys)
+
+	m, cmd := m.Update(typed('n'))
+	if cmd != nil {
+		t.Error("n produced a command, want nil")
+	}
+	if node, _ := m.Selected(); node.Path != "src" {
+		t.Errorf("Selected().Path = %q after n, want the reassigned key to move the cursor", node.Path)
+	}
+
+	// The default key is replaced, not added.
+	fresh := loadRootWith(t, treeFake(t), keys)
+	fresh, _ = fresh.Update(typed('j'))
+	if node, _ := fresh.Selected(); node.Path != "docs" {
+		t.Errorf("Selected().Path = %q after j, want the default key replaced", node.Path)
+	}
+}
+
+func TestEmptyRegistryFallsBackToTheDefaults(t *testing.T) {
+	m := loadRootWith(t, treeFake(t), keymap.Registry{})
+
+	m, _ = m.Update(typed('j'))
+	if node, _ := m.Selected(); node.Path != "src" {
+		t.Errorf("Selected().Path = %q after j, want the built-in keymap", node.Path)
+	}
+}
+
 func TestFilterSearchesLoadedNodesAndFlattensMatches(t *testing.T) {
 	m := loadRoot(t, treeFake(t))
 	m = expand(t, m, key(tea.KeyRight))
@@ -511,7 +564,7 @@ func TestMouseWheelScrollsOffset(t *testing.T) {
 
 func TestViewStates(t *testing.T) {
 	t.Run("loading", func(t *testing.T) {
-		view := plain(New(treeFake(t), "").View())
+		view := plain(New(treeFake(t), "", keymap.Default()).View())
 		if !strings.Contains(view, "cargando") {
 			t.Errorf("View() = %q, want the loading state", view)
 		}
@@ -569,7 +622,7 @@ func TestViewStates(t *testing.T) {
 }
 
 func TestMissingServiceReportsAnError(t *testing.T) {
-	m := New(nil, "")
+	m := New(nil, "", keymap.Default())
 
 	m = drain(t, m, m.Init())
 
@@ -623,7 +676,7 @@ func TestUpdateIgnoresUnrelatedMessages(t *testing.T) {
 
 func TestLoadingReportsPendingReads(t *testing.T) {
 	files := treeFake(t)
-	m := New(files, "")
+	m := New(files, "", keymap.Default())
 
 	if !m.Loading() {
 		t.Error("Loading() = false before Init, want true")
@@ -653,5 +706,27 @@ func TestLoadingAndErrReportFailures(t *testing.T) {
 	}
 	if !errors.Is(m.Err(), domain.ErrPermissionDenied) {
 		t.Errorf("Err() = %v, want %v", m.Err(), domain.ErrPermissionDenied)
+	}
+}
+
+// TestKeymapOverrideReachesTheFilterHeader checks that the header names the effective filter key,
+// both while the filter is being typed and once it is applied.
+func TestKeymapOverrideReachesTheFilterHeader(t *testing.T) {
+	m := loadRootWith(t, treeFake(t), overrideKeys(t, map[string][]string{"tree_filter": {"f"}}))
+
+	m, _ = m.Update(typed('f'))
+	for _, r := range "go" {
+		m, _ = m.Update(typed(r))
+	}
+	if view := plain(m.View()); !strings.Contains(view, "fgo") {
+		t.Errorf("View() = %q, want the effective filter key while typing", view)
+	}
+
+	m, _ = m.Update(key(tea.KeyEnter))
+	if got := m.Filter(); got != "go" {
+		t.Fatalf("Filter() = %q, want %q", got, "go")
+	}
+	if view := plain(m.View()); !strings.Contains(view, "filtro: fgo") {
+		t.Errorf("View() = %q, want the effective filter key of the applied filter", view)
 	}
 }

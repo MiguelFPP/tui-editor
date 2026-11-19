@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const treeLines = 30
@@ -72,7 +74,14 @@ func testDeps(t *testing.T) Deps {
 		}, nil
 	}
 
-	deps := Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git, Editor: editors, Docker: docker}
+	deps := Deps{
+		Config: config.Config{Repo: t.TempDir(), Editor: "vim"},
+		Files:  files,
+		Git:    git,
+		Editor: editors,
+		Docker: docker,
+		Keys:   keymap.Default(),
+	}
 
 	return deps
 }
@@ -195,7 +204,7 @@ func TestNewKeepsConfigAndDefaults(t *testing.T) {
 	deps := testDeps(t)
 	m := New(deps)
 
-	if m.cfg != deps.Config {
+	if !reflect.DeepEqual(m.cfg, deps.Config) {
 		t.Errorf("cfg = %+v, want %+v", m.cfg, deps.Config)
 	}
 	if m.Tab() != FilesTab || m.Focus() != FocusTree {
@@ -254,6 +263,144 @@ func TestQuitKeys(t *testing.T) {
 				t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
 			}
 		})
+	}
+}
+
+// withKeys returns the default registry with the overrides applied on top of it.
+func withKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
+}
+
+func TestDefaultKeymapIsUsedWithoutOne(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = keymap.Registry{}
+
+	m := newSized(t, deps, 120, 40)
+	m = update(t, m, typed('2'))
+
+	if m.Tab() != GitTab {
+		t.Errorf("Tab() = %v, want the built-in keymap to switch the tab", m.Tab())
+	}
+}
+
+// TestHelpAndStatusbarShowTheEffectiveKeys checks that the help overlay and the statusbar render the
+// keys of the injected keymap, never the built-in ones.
+func TestHelpAndStatusbarShowTheEffectiveKeys(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"help": {"h"}, "quit": {"x"}, "tab_git": {"g"}})
+
+	m := newSized(t, deps, 200, 40)
+	m = update(t, m, typed('h'))
+	if !m.HelpVisible() {
+		t.Fatal("HelpVisible() = false, want the reassigned key to open the help")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{
+		"h  abrir la ayuda",
+		"x / ctrl+c  salir de la aplicación",
+		"g  pestaña de Git",
+		"esc  cerrar la ayuda o reenviarla al panel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+	if strings.Contains(view, "?  abrir la ayuda") {
+		t.Errorf("View() = %q, want the default help key replaced", view)
+	}
+
+	m = update(t, m, key(tea.KeyEscape))
+	if m.HelpVisible() {
+		t.Fatal("HelpVisible() = true, want esc to close the help")
+	}
+
+	status := plainCells(m.View().Content)
+	for _, want := range []string{"1/g/3 tabs", "tab foco", "h ayuda", "x / ctrl+c salir"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("View() = %q, want %q", status, want)
+		}
+	}
+}
+
+func TestTabsSwitchWithTheOverriddenKey(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"tab_git": {"g"}})
+
+	m := newSized(t, deps, 120, 40)
+	m = update(t, m, typed('g'))
+	if m.Tab() != GitTab || m.Focus() != FocusGit {
+		t.Errorf("tab/focus = %v/%v after g, want Git/git", m.Tab(), m.Focus())
+	}
+
+	// The default key is replaced, not added.
+	fresh := newSized(t, deps, 120, 40)
+	fresh = update(t, fresh, typed('2'))
+	if fresh.Tab() != FilesTab {
+		t.Errorf("Tab() = %v after 2, want the default key replaced", fresh.Tab())
+	}
+}
+
+func TestQuitKeyCanBeReassigned(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"quit": {"x"}})
+
+	m := newSized(t, deps, 120, 40)
+
+	cmd, stop := m.handleKey(typed('x'))
+	if !stop {
+		t.Fatal("x did not quit, want the reassigned key to quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
+	}
+
+	// q is no longer a quit key: it falls through to the focused panel.
+	if _, stop := m.handleKey(typed('q')); stop {
+		t.Error("q still quits, want the default key replaced")
+	}
+
+	// ctrl+c is fixed: reassigning quit never disables it.
+	cmd, stop = m.handleKey(ctrlC())
+	if !stop {
+		t.Fatal("ctrl+c did not quit, want the fixed key always active")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestDraftCapturesAReassignedQuitKey(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"quit": {"x"}})
+
+	m := newSized(t, deps, 120, 40)
+	m = openDraft(t, m, "main.go", 120)
+
+	// ctrl+c stays fixed: it quits while the draft is still clean.
+	if _, stop := m.handleKey(ctrlC()); !stop {
+		t.Error("ctrl+c did not quit, want the fixed key always active")
+	}
+
+	// The reassigned key is written into the draft instead of leaving the program.
+	if _, stop := m.handleKey(typed('x')); stop {
+		t.Error("x quit the program, want the draft to capture the reassigned key")
+	}
+	if !m.editor.CapturesInput() {
+		t.Error("CapturesInput() = false, want the draft kept open")
+	}
+	if got := m.editor.Err(); got != nil {
+		t.Errorf("Err() = %v, want no error from typing", got)
+	}
+	if !m.editor.Dirty() {
+		t.Error("Dirty() = false, want the reassigned key typed into the draft")
 	}
 }
 
@@ -408,8 +555,11 @@ func TestHelpTogglesWithTheQuestionMark(t *testing.T) {
 	}
 
 	view := m.View().Content
-	for _, want := range []string{"atajos", "1 / 2", "tab"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{
+		"tui-editor · atajos", "1  pestaña de archivos", "tab  siguiente panel",
+		"esc  cerrar la ayuda", ",  ver la configuración",
+	} {
+		if !strings.Contains(plainCells(view), want) {
 			t.Errorf("View() = %q, want %q", view, want)
 		}
 	}
@@ -438,6 +588,95 @@ func TestHelpSwallowsOtherKeys(t *testing.T) {
 	m = update(t, m, typed('2'))
 	if m.Tab() != FilesTab || !m.HelpVisible() {
 		t.Errorf("tab/help changed while the help was open: tab=%v help=%v", m.Tab(), m.HelpVisible())
+	}
+}
+
+func TestDefaultKeymapIncludesConfig(t *testing.T) {
+	if action, ok := keymap.Default().Match(keymap.ScopeRoot, ","); !ok || action != keymap.ActionConfig {
+		t.Errorf("Match(root, %q) = (%q, %v), want (%q, true)", ",", action, ok, keymap.ActionConfig)
+	}
+}
+
+func TestConfigOverlayOpensClosesAndShowsData(t *testing.T) {
+	deps := testDeps(t)
+	deps.Config.ConfigPath = "/tmp/tui-editor/config.json"
+	deps.Config.Keys = map[string][]string{"tree_down": {"n"}, "docker_logs": {"o"}}
+
+	m := New(deps)
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the , key to open the overlay")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{"/tmp/tui-editor/config.json", "overrides: 2", "tree_down", "docker_logs", "reinicia"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+
+	m, _ = press(t, m, key(tea.KeyEscape))
+	if m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = true, want esc to close the overlay")
+	}
+}
+
+func TestConfigOverlayWithoutFile(t *testing.T) {
+	deps := testDeps(t)
+	deps.Config.ConfigPath = ""
+	deps.Config.Keys = nil
+
+	m := New(deps)
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the overlay open")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{"sin archivo (defaults)", "sin overrides"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+}
+
+func TestConfigOverlayIgnoresMouse(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+	m = openFile(t, m, "main.go")
+
+	m, _ = press(t, m, typed(','))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the overlay open")
+	}
+
+	m = update(t, m, click(tabMiddle(m, DockerTab), tabRow))
+	if m.Tab() != FilesTab || m.Focus() != FocusEditor {
+		t.Errorf("tab/focus = %v/%v, want Files/editor kept while the overlay is open", m.Tab(), m.Focus())
+	}
+
+	m = update(t, m, wheel(tea.MouseWheelDown, m.editorRect.Min.X+2, m.editorRect.Min.Y+2))
+	if m.Focus() != FocusEditor {
+		t.Errorf("Focus() = %v, want editor kept on a wheel while the overlay is open", m.Focus())
+	}
+}
+
+func TestConfigActionCanBeReassigned(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"config": {"F2"}})
+
+	m := newSized(t, deps, 120, 40)
+	m, _ = press(t, m, key(tea.KeyF2))
+	if !m.ConfigVisible() {
+		t.Fatal("ConfigVisible() = false, want the reassigned F2 to open the overlay")
+	}
+
+	// The default key is replaced, not added.
+	fresh := newSized(t, deps, 120, 40)
+	fresh, _ = press(t, fresh, typed(','))
+	if fresh.ConfigVisible() {
+		t.Error("ConfigVisible() = true after ,, want the default key replaced")
 	}
 }
 

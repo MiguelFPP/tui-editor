@@ -1,16 +1,105 @@
-// Package styles holds the Tokyo Night palette and the style tokens shared by the TUI.
+// Package styles holds the theme catalog and shared style tokens.
 package styles
 
-import "charm.land/lipgloss/v2"
+import (
+	"strings"
 
-// Tokyo Night palette: the only colour literals of the TUI live here.
-const (
-	ColorAccent = "#7aa2f7" // headings, active tabs and directories
-	ColorMuted  = "#9aa5ce" // statusbar and secondary text
-	ColorBorder = "#565f89" // frames
-	ColorGreen  = "#9ece6a" // added lines and keys
-	ColorRed    = "#f7768e" // failures and removed lines
+	"charm.land/lipgloss/v2"
 )
+
+// Theme is one selectable palette plus the Chroma style that colours the preview.
+type Theme struct {
+	Name        string
+	Description string
+	ChromaStyle string
+	Accent      string
+	Muted       string
+	Border      string
+	Green       string
+	Red         string
+}
+
+// catalog is the ordered list of themes; the first one is the default.
+var catalog = []Theme{
+	{
+		Name:        "tokyonight-night",
+		Description: "Tokyo Night",
+		ChromaStyle: "tokyonight-night",
+		Accent:      "#7aa2f7",
+		Muted:       "#9aa5ce",
+		Border:      "#565f89",
+		Green:       "#9ece6a",
+		Red:         "#f7768e",
+	},
+	{
+		Name:        "catppuccin-mocha",
+		Description: "Catppuccin Mocha",
+		ChromaStyle: "catppuccin-mocha",
+		Accent:      "#89b4fa",
+		Muted:       "#a6adc8",
+		Border:      "#585b70",
+		Green:       "#a6e3a1",
+		Red:         "#f38ba8",
+	},
+	{
+		Name:        "dracula",
+		Description: "Dracula",
+		ChromaStyle: "dracula",
+		Accent:      "#bd93f9",
+		Muted:       "#6272a4",
+		Border:      "#44475a",
+		Green:       "#50fa7b",
+		Red:         "#ff5555",
+	},
+	{
+		Name:        "gruvbox-dark",
+		Description: "Gruvbox Dark",
+		ChromaStyle: "gruvbox",
+		Accent:      "#83a598",
+		Muted:       "#928374",
+		Border:      "#504945",
+		Green:       "#b8bb26",
+		Red:         "#fb4934",
+	},
+}
+
+// Themes returns a copy of the catalog in selection order.
+func Themes() []Theme {
+	out := make([]Theme, len(catalog))
+	copy(out, catalog)
+
+	return out
+}
+
+// DefaultTheme returns Tokyo Night, the palette the TUI ships with.
+func DefaultTheme() Theme {
+	return catalog[0]
+}
+
+// ThemeByName resolves a theme by its exact name, ignoring surrounding space.
+func ThemeByName(name string) (Theme, bool) {
+	want := strings.TrimSpace(name)
+	for _, theme := range catalog {
+		if theme.Name == want {
+			return theme, true
+		}
+	}
+
+	return Theme{}, false
+}
+
+// ThemeNames lists the catalog names in order.
+func ThemeNames() []string {
+	names := make([]string, 0, len(catalog))
+	for _, theme := range catalog {
+		names = append(names, theme.Name)
+	}
+
+	return names
+}
+
+// current is the palette the tokens were last built from.
+var current Theme
 
 // PlainCells keeps tabs untouched, so the rendered rows match the parsed text.
 func PlainCells(style lipgloss.Style) lipgloss.Style {
@@ -18,43 +107,89 @@ func PlainCells(style lipgloss.Style) lipgloss.Style {
 }
 
 // Border frames an overlay or an unfocused panel.
-var Border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(ColorBorder))
+var Border = lipgloss.NewStyle()
 
 // BorderFocused frames the panel that owns the keyboard: the accent colour plus the statusbar cue.
-var BorderFocused = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(ColorAccent))
+var BorderFocused = lipgloss.NewStyle()
 
 // Help is the keymap overlay: the neutral frame plus its inner padding.
-var Help = Border.Padding(0, 2)
+var Help = lipgloss.NewStyle()
 
 // Tokens of text that never carries tabs: the layout chrome, the tree and the state lines.
 var (
-	Title        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent))
-	Tab          = lipgloss.NewStyle().Faint(true)
-	TabActive    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent))
-	TabSeparator = lipgloss.NewStyle().Faint(true)
-	Status       = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorMuted))
-	HelpTitle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent))
-	HelpKey      = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen))
-	Placeholder  = lipgloss.NewStyle().Faint(true)
-	Spinner      = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent))
+	Title        = lipgloss.NewStyle()
+	Tab          = lipgloss.NewStyle()
+	TabActive    = lipgloss.NewStyle()
+	TabSeparator = lipgloss.NewStyle()
+	Status       = lipgloss.NewStyle()
+	HelpTitle    = lipgloss.NewStyle()
+	HelpKey      = lipgloss.NewStyle()
+	Placeholder  = lipgloss.NewStyle()
+	Spinner      = lipgloss.NewStyle()
 
-	Dir    = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAccent))
-	Cursor = lipgloss.NewStyle().Bold(true).Reverse(true)
-	Meta   = lipgloss.NewStyle().Faint(true)
-	Fail   = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed))
+	Dir    = lipgloss.NewStyle()
+	Cursor = lipgloss.NewStyle()
+	Meta   = lipgloss.NewStyle()
+	Fail   = lipgloss.NewStyle()
 )
 
 // The Plain tokens keep the tabs of the rows they render: files, diffs and logs.
 var (
-	DiffHeader     = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent)))
-	TitlePlain     = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent)))
-	TabPlain       = PlainCells(lipgloss.NewStyle().Faint(true))
-	TabActivePlain = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ColorAccent)))
-	CursorPlain    = PlainCells(lipgloss.NewStyle().Bold(true).Reverse(true))
-	MetaPlain      = PlainCells(lipgloss.NewStyle().Faint(true))
-	Gutter         = PlainCells(lipgloss.NewStyle().Faint(true))
-	Header         = PlainCells(lipgloss.NewStyle().Faint(true))
-	Added          = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen)))
-	Removed        = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)))
-	FailPlain      = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)))
+	DiffHeader     = lipgloss.NewStyle()
+	TitlePlain     = lipgloss.NewStyle()
+	TabPlain       = lipgloss.NewStyle()
+	TabActivePlain = lipgloss.NewStyle()
+	CursorPlain    = lipgloss.NewStyle()
+	MetaPlain      = lipgloss.NewStyle()
+	Gutter         = lipgloss.NewStyle()
+	Header         = lipgloss.NewStyle()
+	Added          = lipgloss.NewStyle()
+	Removed        = lipgloss.NewStyle()
+	FailPlain      = lipgloss.NewStyle()
 )
+
+// Apply rebuilds every token from theme and makes it the active palette.
+func Apply(theme Theme) {
+	current = theme
+
+	Border = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(theme.Border))
+	BorderFocused = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(theme.Accent))
+	Help = Border.Padding(0, 2)
+
+	Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent))
+	Tab = lipgloss.NewStyle().Faint(true)
+	TabActive = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent))
+	TabSeparator = lipgloss.NewStyle().Faint(true)
+	Status = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Muted))
+	HelpTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent))
+	HelpKey = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Green))
+	Placeholder = lipgloss.NewStyle().Faint(true)
+	Spinner = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Accent))
+
+	Dir = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Accent))
+	Cursor = lipgloss.NewStyle().Bold(true).Reverse(true)
+	Meta = lipgloss.NewStyle().Faint(true)
+	Fail = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Red))
+
+	DiffHeader = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent)))
+	TitlePlain = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent)))
+	TabPlain = PlainCells(lipgloss.NewStyle().Faint(true))
+	TabActivePlain = PlainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(theme.Accent)))
+	CursorPlain = PlainCells(lipgloss.NewStyle().Bold(true).Reverse(true))
+	MetaPlain = PlainCells(lipgloss.NewStyle().Faint(true))
+	Gutter = PlainCells(lipgloss.NewStyle().Faint(true))
+	Header = PlainCells(lipgloss.NewStyle().Faint(true))
+	Added = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Green)))
+	Removed = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Red)))
+	FailPlain = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Red)))
+}
+
+// CurrentTheme returns the palette the tokens were last built from.
+func CurrentTheme() Theme {
+	return current
+}
+
+// init paints the tokens with the default palette, so the package renders on load.
+func init() {
+	Apply(DefaultTheme())
+}
