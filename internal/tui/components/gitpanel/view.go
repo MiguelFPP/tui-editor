@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 // tabSeparator joins the section labels; the mouse hit-testing relies on it.
@@ -17,7 +18,7 @@ const titleSeparator = " · "
 func (m Model) View() string {
 	lines := make([]string, 0, m.bodyHeight()+headerRows+footerRows)
 
-	lines = append(lines, styles.title.Render(truncate(m.titleText(), m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate(m.titleText(), m.width)))
 	lines = append(lines, m.tabs())
 
 	switch {
@@ -33,7 +34,7 @@ func (m Model) View() string {
 		lines = append(lines, m.commitLines()...)
 	default:
 		lines = append(lines, m.body()...)
-		lines = append(lines, styles.meta.Render(truncate(m.footerText(), m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate(m.footerText(), m.width)))
 	}
 
 	return strings.Join(lines, "\n")
@@ -145,12 +146,12 @@ func (m Model) tabs() string {
 	rendered := make([]string, 0, sectionCount)
 	for index, label := range labels {
 		if Section(index) == m.section {
-			rendered = append(rendered, styles.tabOn.Render(label))
+			rendered = append(rendered, styles.TabActivePlain.Render(label))
 
 			continue
 		}
 
-		rendered = append(rendered, styles.tab.Render(label))
+		rendered = append(rendered, styles.TabPlain.Render(label))
 	}
 
 	return strings.Join(rendered, tabSeparator)
@@ -172,7 +173,7 @@ func (m Model) body() []string {
 	for i := start; i < end; i++ {
 		line := truncate(rows[i], m.width)
 		if i == m.cursors[m.section] {
-			line = styles.cursor.Render(line)
+			line = styles.CursorPlain.Render(line)
 		}
 
 		window = append(window, line)
@@ -184,38 +185,38 @@ func (m Model) body() []string {
 // stateLine is the message that replaces the rows while loading or when there is nothing to show.
 func (m Model) stateLine() (string, bool) {
 	if m.writeErr != nil {
-		return styles.fail.Render(truncate("error al escribir: "+describeError(m.writeErr), m.width)), true
+		return styles.FailPlain.Render(truncate("error al escribir: "+describeError(m.writeErr), m.width)), true
 	}
 	if err := m.sectionError(m.section); err != nil {
-		return styles.fail.Render(truncate("error: "+describeError(err), m.width)), true
+		return styles.FailPlain.Render(truncate("error: "+describeError(err), m.width)), true
 	}
 	if m.sectionLoading(m.section) && len(m.active()) == 0 {
-		return styles.meta.Render("cargando…"), true
+		return styles.MetaPlain.Render("cargando…"), true
 	}
 
 	switch m.section {
 	case Changes:
 		switch {
 		case m.status.Unborn:
-			return styles.meta.Render(truncate("sin commits todavía", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin commits todavía", m.width)), true
 		case len(m.status.Files) == 0:
-			return styles.meta.Render(truncate("sin cambios", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin cambios", m.width)), true
 		}
 	case Diff:
 		if !m.loaded {
-			return styles.meta.Render(truncate("sin diff · enter en Cambios para cargarlo", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin diff · enter en Cambios para cargarlo", m.width)), true
 		}
 	case Branches:
 		if len(m.branches) == 0 {
-			return styles.meta.Render(truncate("sin ramas", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin ramas", m.width)), true
 		}
 	case Stash:
 		if len(m.stashes) == 0 {
-			return styles.meta.Render(truncate("sin stash · z en Cambios para guardar cambios", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin stash · z en Cambios para guardar cambios", m.width)), true
 		}
 	case History:
 		if len(m.history.Commits) == 0 {
-			return styles.meta.Render(truncate("sin commits", m.width)), true
+			return styles.MetaPlain.Render(truncate("sin commits", m.width)), true
 		}
 	}
 
@@ -341,17 +342,17 @@ func (m Model) helpSection(section Section, keys ...string) []string {
 func (m Model) commitLines() []string {
 	lines := make([]string, 0, m.bodyHeight()+footerRows)
 
-	lines = append(lines, styles.title.Render(truncate("commit · mensaje", m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate("commit · mensaje", m.width)))
 	lines = append(lines, strings.Split(m.commit.area.View(), "\n")...)
 
 	if m.writing {
-		lines = append(lines, styles.meta.Render(truncate("escribiendo el commit…", m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate("escribiendo el commit…", m.width)))
 	}
 	if m.commit.err != nil {
-		lines = append(lines, styles.fail.Render(truncate("error: "+describeError(m.commit.err), m.width)))
+		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.commit.err), m.width)))
 	}
 
-	lines = append(lines, styles.meta.Render(truncate("ctrl+s: confirmar · esc: cancelar · enter: nueva línea", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate("ctrl+s: confirmar · esc: cancelar · enter: nueva línea", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
@@ -360,17 +361,17 @@ func (m Model) commitLines() []string {
 func (m Model) promptLines() []string {
 	lines := make([]string, 0, m.bodyHeight()+footerRows)
 
-	lines = append(lines, styles.title.Render(truncate(m.promptTitle(), m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate(m.promptTitle(), m.width)))
 	lines = append(lines, m.prompt.input.View())
 
 	if m.writing {
-		lines = append(lines, styles.meta.Render(truncate("escribiendo…", m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate("escribiendo…", m.width)))
 	}
 	if m.prompt.err != nil {
-		lines = append(lines, styles.fail.Render(truncate("error: "+describeError(m.prompt.err), m.width)))
+		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.prompt.err), m.width)))
 	}
 
-	lines = append(lines, styles.meta.Render(truncate("enter: confirmar · esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate("enter: confirmar · esc: cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
@@ -387,16 +388,16 @@ func (m Model) promptTitle() string {
 func (m Model) confirmLines() []string {
 	lines := make([]string, 0, m.bodyHeight()+footerRows)
 
-	lines = append(lines, styles.title.Render(truncate("confirmar · "+m.confirmQuestion(), m.width)))
+	lines = append(lines, styles.TitlePlain.Render(truncate("confirmar · "+m.confirmQuestion(), m.width)))
 
 	if m.writing {
-		lines = append(lines, styles.meta.Render(truncate("escribiendo…", m.width)))
+		lines = append(lines, styles.MetaPlain.Render(truncate("escribiendo…", m.width)))
 	}
 	if m.confirm.err != nil {
-		lines = append(lines, styles.fail.Render(truncate("error: "+describeError(m.confirm.err), m.width)))
+		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.confirm.err), m.width)))
 	}
 
-	lines = append(lines, styles.meta.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }

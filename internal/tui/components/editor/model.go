@@ -13,11 +13,11 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -25,6 +25,9 @@ const (
 	defaultHeight = 20
 	headerRows    = 1
 	tabWidth      = 4
+
+	// wheelStep is the number of rows one wheel notch moves the draft.
+	wheelStep = 3
 
 	loadTimeout = 5 * time.Second
 	saveTimeout = 10 * time.Second
@@ -58,23 +61,6 @@ type previewLoadedMsg struct {
 
 var errNoService = errors.New("editor: servicio de archivos no configurado")
 
-var styles = struct {
-	title  lipgloss.Style
-	meta   lipgloss.Style
-	gutter lipgloss.Style
-	fail   lipgloss.Style
-}{
-	title:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	meta:   plainCells(lipgloss.NewStyle().Faint(true)),
-	gutter: plainCells(lipgloss.NewStyle().Faint(true)),
-	fail:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched: the viewport measures cells, not expanded tabs.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
-
 // Model is the editor/preview component; it never performs I/O outside a command.
 type Model struct {
 	files   ports.FileService
@@ -91,6 +77,9 @@ type Model struct {
 
 	editing        bool
 	dirty          bool
+	draftLines     []string
+	draftSource    string
+	draftTop       int
 	stamp          domain.FileStamp
 	saveErr        error
 	saving         bool
@@ -177,6 +166,15 @@ func (m Model) Dirty() bool {
 	return m.dirty
 }
 
+// CaretLine is the zero-based line of the draft caret.
+func (m Model) CaretLine() int {
+	if !m.editing {
+		return 0
+	}
+
+	return m.area.Line()
+}
+
 // Update applies one message; scrolling and resizing stay off the I/O path.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -198,15 +196,33 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tea.MouseWheelMsg:
 		if m.editing {
-			return m, nil // the draft covers the preview
+			m.scrollDraft(wheelDelta(msg.Button))
+
+			return m, nil
 		}
 
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 
 		return m, cmd
+	case tea.MouseClickMsg:
+		m.handleDraftClick(msg)
+
+		return m, nil
 	default:
 		return m, nil
+	}
+}
+
+// wheelDelta maps a wheel notch to the rows the draft moves.
+func wheelDelta(button tea.MouseButton) int {
+	switch button {
+	case tea.MouseWheelUp:
+		return -wheelStep
+	case tea.MouseWheelDown:
+		return wheelStep
+	default:
+		return 0
 	}
 }
 
@@ -224,7 +240,7 @@ func (m Model) View() string {
 			break
 		}
 		if m.saveErr != nil {
-			lines = append(lines, styles.fail.Render("error: "+describeError(m.saveErr)))
+			lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))
 		}
 
 		lines = append(lines, m.viewport.View())
@@ -297,6 +313,7 @@ func (m *Model) applyPreview(msg previewLoadedMsg) {
 func (m *Model) syncDraft() {
 	m.area.SetValue(m.raw)
 	m.dirty = false
+	m.clearDraftLines()
 }
 
 // sync rebuilds the rendered body and pushes it into the viewport.
@@ -325,20 +342,35 @@ func (m Model) gutter() viewport.GutterFunc {
 
 // lineNumbers renders a fixed-width, right-aligned gutter that keeps ANSI intact.
 func lineNumbers(total int) viewport.GutterFunc {
-	digits := len(strconv.Itoa(max(total, 1)))
+	digits := gutterDigits(total)
 
 	return func(ctx viewport.GutterContext) string {
 		if ctx.Soft {
-			return styles.gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
+			return gutterBlank(digits)
 		}
 
-		return styles.gutter.Render(fmt.Sprintf("%*d", digits, ctx.Index+1) + gutterSeparator)
+		return gutterNumber(ctx.Index, digits)
 	}
+}
+
+// gutterDigits is the width of the widest number of a block of total lines.
+func gutterDigits(total int) int {
+	return len(strconv.Itoa(max(total, 1)))
+}
+
+// gutterNumber renders one right-aligned number cell.
+func gutterNumber(index, digits int) string {
+	return styles.Gutter.Render(fmt.Sprintf("%*d", digits, index+1) + gutterSeparator)
+}
+
+// gutterBlank renders an empty number cell, so the unnumbered rows keep the column.
+func gutterBlank(digits int) string {
+	return styles.Gutter.Render(strings.Repeat(" ", digits) + gutterSeparator)
 }
 
 // header is one line with the path, the mode and the state flags, cut to width.
 func (m Model) header() string {
-	return styles.title.Render(fitHeader(strings.Join(m.headerParts(), headerSeparator), m.width))
+	return styles.TitlePlain.Render(fitHeader(strings.Join(m.headerParts(), headerSeparator), m.width))
 }
 
 // headerParts keeps the path first, then the mode, then the state flags.
@@ -361,6 +393,7 @@ func (m Model) headerParts() []string {
 	}
 	if m.editing {
 		parts = append(parts, "editando")
+		parts = append(parts, fmt.Sprintf("ln %d, col %d", m.area.Line()+1, m.area.Column()+1))
 	}
 	if m.dirty {
 		parts = append(parts, "sin guardar")
@@ -399,11 +432,11 @@ func (m Model) pathLabel() string {
 func (m Model) stateLine() (string, bool) {
 	switch {
 	case m.err != nil:
-		return styles.fail.Render("error: " + describeError(m.err)), true
+		return styles.FailPlain.Render("error: " + describeError(m.err)), true
 	case m.loading:
-		return styles.meta.Render("cargando…"), true
+		return styles.MetaPlain.Render("cargando…"), true
 	case m.content == "":
-		return styles.meta.Render("vacío"), true
+		return styles.MetaPlain.Render("vacío"), true
 	default:
 		return "", false
 	}

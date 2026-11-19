@@ -16,6 +16,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/editor"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -45,17 +46,19 @@ const (
 	FilesTab Tab = iota
 	GitTab
 	DockerTab
+
+	tabCount = 3
 )
 
+// tabLabels are the rendered labels, shared by the tab row and its hit-testing.
+var tabLabels = [tabCount]string{FilesTab: " Files ", GitTab: " Git ", DockerTab: " Docker "}
+
 func (t Tab) String() string {
-	switch t {
-	case GitTab:
-		return "Git"
-	case DockerTab:
-		return "Docker"
-	default:
-		return "Files"
+	if t >= tabCount {
+		return strings.TrimSpace(tabLabels[FilesTab])
 	}
+
+	return strings.TrimSpace(tabLabels[t])
 }
 
 // Focus is the panel that receives the keyboard of the active tab.
@@ -95,6 +98,7 @@ type Model struct {
 	width  int
 	height int
 
+	tabRects   [tabCount]image.Rectangle
 	treeRect   image.Rectangle
 	editorRect image.Rectangle
 	gitRect    image.Rectangle
@@ -123,12 +127,12 @@ func New(deps Deps) Model {
 		editors:  deps.Editor,
 		tree:     filetree.New(deps.Files, ""),
 		git:      gitpanel.New(deps.Git),
-		docker:   dockerpanel.New(deps.Docker),
+		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo),
 		tab:      FilesTab,
 		focus:    FocusTree,
 		width:    defaultWidth,
 		height:   defaultHeight,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.spinner)),
+		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
 		spinning: true,
 	}
 	m.resize()
@@ -349,10 +353,14 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-// handleClick routes a click to the panel under the cursor, if any.
+// handleClick routes a click to the top tabs first and then to the panel under the cursor.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	if m.help {
 		return nil
+	}
+
+	if tab, ok := m.tabAt(msg.X, msg.Y); ok {
+		return m.setTab(tab) // an active tab is a no-op: it never steals the focus
 	}
 
 	panel, ok := m.panelAt(msg.X, msg.Y)
@@ -379,6 +387,19 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	return m.dispatchMouse(msg, panel)
 }
 
+// tabAt maps terminal coordinates to the top tab that owns them.
+func (m Model) tabAt(x, y int) (Tab, bool) {
+	point := image.Pt(x, y)
+
+	for tab := Tab(0); tab < tabCount; tab++ {
+		if m.tabRects[tab].Dx() > 0 && point.In(m.tabRects[tab]) {
+			return tab, true
+		}
+	}
+
+	return m.tab, false
+}
+
 // panelAt maps terminal coordinates to the panel that owns them.
 func (m Model) panelAt(x, y int) (Focus, bool) {
 	point := image.Pt(x, y)
@@ -400,6 +421,19 @@ func (m Model) panelAt(x, y int) (Focus, bool) {
 	}
 }
 
+// editorMouse rebases a terminal mouse event onto the editor rect; the wheel carries no coordinates.
+func (m Model) editorMouse(msg tea.Msg) tea.Msg {
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		msg.X -= m.editorRect.Min.X
+		msg.Y -= m.editorRect.Min.Y
+
+		return msg
+	default:
+		return msg
+	}
+}
+
 func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 	switch panel {
 	case FocusTree:
@@ -412,7 +446,7 @@ func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 			return nil
 		}
 
-		next, cmd := m.editor.Update(msg)
+		next, cmd := m.editor.Update(m.editorMouse(msg))
 		m.editor = next
 
 		return cmd

@@ -135,9 +135,27 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openConfirm(confirmRestart)
 	case "r":
 		return m.refresh()
+	case "a":
+		return m.toggleScope()
 	}
 
 	return nil
+}
+
+// toggleScope switches between project-only and every container, keeping the selection.
+func (m *Model) toggleScope() tea.Cmd {
+	if m.repoRoot == "" {
+		return nil // without a root there is nothing to narrow to
+	}
+
+	if selected, ok := m.selected(); ok {
+		m.anchoredID = selected.ID
+	}
+	m.showAll = !m.showAll
+	m.scope = m.buildScope()
+	m.cursor, m.offset = 0, 0
+
+	return m.startLoad()
 }
 
 // moveCursor moves the selection and keeps it inside the visible window.
@@ -303,13 +321,13 @@ func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
 	return nil
 }
 
-// loadContainers asks the port for the container list.
+// loadContainers asks the port for the container list of the active scope.
 func (m *Model) loadContainers() tea.Cmd {
 	m.containersSeq++
 	m.loadingContainers = true
 	m.err = nil
 
-	return loadContainers(m.docker, m.containersSeq)
+	return loadContainers(m.docker, m.containersSeq, m.scope)
 }
 
 // loadStats asks the port for one sample of the selection.
@@ -383,7 +401,25 @@ func (m *Model) applyContainers(msg containersMsg) {
 	}
 
 	m.rebuildRows()
+	m.restoreAnchor()
 	m.clamp()
+}
+
+// restoreAnchor puts the cursor back on the container selected before a scope change.
+func (m *Model) restoreAnchor() {
+	if m.anchoredID == "" {
+		return
+	}
+
+	for i, container := range m.containers {
+		if container.ID == m.anchoredID {
+			m.cursor = i
+
+			break
+		}
+	}
+
+	m.anchoredID = ""
 }
 
 // applyStats stores one sample; a failed sample is best effort and leaves the header unchanged.
@@ -521,7 +557,7 @@ func noticeOf(op string) string {
 	}
 }
 
-func loadContainers(docker ports.DockerService, seq int) tea.Cmd {
+func loadContainers(docker ports.DockerService, seq int, scope domain.ContainerScope) tea.Cmd {
 	if docker == nil {
 		return func() tea.Msg { return containersMsg{seq: seq, err: errNoService} }
 	}
@@ -530,7 +566,7 @@ func loadContainers(docker ports.DockerService, seq int) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 		defer cancel()
 
-		containers, err := docker.Containers(ctx)
+		containers, err := docker.Containers(ctx, scope)
 
 		return containersMsg{seq: seq, containers: containers, err: err}
 	}

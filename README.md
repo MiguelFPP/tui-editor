@@ -4,10 +4,10 @@ TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploració
 y edición rápida de archivos, control completo de Git y monitorización de
 contenedores Docker. Funciona con teclado y ratón.
 
-Estado actual: **v0.3.2 (instalación en una línea)**. Sobre el panel Docker de
-v0.3.0, esta versión añade instaladores para Linux, macOS y Windows que resuelven
-la última release, verifican su checksum e instalan el binario en el `PATH`, y
-pueden actualizar la instalación aunque la TUI esté en ejecución.
+Estado actual: **v0.4.0 (mejoras de interfaz)**. Sobre v0.3.2, esta versión hace
+clicables las pestañas, mantiene el resaltado de sintaxis al editar, enmarca
+cada panel con el foco visible y limita el panel Docker a los contenedores del
+proyecto abierto. Los instaladores de v0.3.2 se mantienen sin cambios.
 
 ## Demo
 
@@ -29,15 +29,17 @@ solo se puebla con `make dev-docker` (ver [Docker y socket](#docker-y-socket)).
 - **Archivos:** árbol con ignores, filtro por nombre/ruta, y preview con
   resaltado de sintaxis (Chroma), números de línea, scroll y detección de
   binarios y tamaño.
-- **Edición rápida:** `e` edita el archivo abierto y `ctrl+s` guarda con sello de
-  la última lectura, así que un archivo cambiado en disco no se sobrescribe.
-  `E`/`ctrl+e` lanza el editor externo.
+- **Edición rápida:** `e` edita el archivo abierto conservando el resaltado de
+  sintaxis, con cursor visible, scroll con rueda y clic para posicionar;
+  `ctrl+s` guarda con sello de la última lectura, así que un archivo cambiado en
+  disco no se sobrescribe. `E`/`ctrl+e` lanza el editor externo.
 - **Git completo:** staging por archivo y por hunk, commits multilínea, ramas
   (crear/borrar/merge), stash (push/pop), resolución de conflictos
   (`ours`/`theirs`/abort) y `fetch`/`pull`/`push`.
-- **Docker:** lista de contenedores (nombre, imagen, estado, health, puertos),
-  muestra puntual de `stats`, `logs` paginados sin `follow` y acciones
-  `start`/`stop`/`restart` con confirmación.
+- **Docker:** lista acotada al proyecto abierto mediante las etiquetas de
+  Compose (nombre, imagen, estado, health, puertos), con `a` para ver todos los
+  contenedores del daemon. Muestra puntual de `stats`, `logs` paginados sin
+  `follow` y acciones `start`/`stop`/`restart` con confirmación.
 - **Multiplataforma y bajo consumo:** binarios estáticos (`CGO_ENABLED=0`) para
   linux/darwin/windows en amd64 y arm64.
 
@@ -272,6 +274,7 @@ el socket no está montado, así que el panel aparece como “no disponible”.
 | Atajo | Acción |
 | --- | --- |
 | `1` / `2` / `3` | Cambiar de pestaña (`Files`, `Git`, `Docker`) |
+| clic en la pestaña | Cambiar de pestaña, con el mismo efecto que `1`/`2`/`3` |
 | `tab` / `shift+tab` | Alternar el foco en `Files`; cambiar de sección en `Git` |
 | `?` | Mostrar u ocultar la ayuda |
 | `esc` | Cerrar la ayuda o reenviar la tecla al panel |
@@ -288,6 +291,9 @@ el socket no está montado, así que el panel aparece como “no disponible”.
 | `esc` | Limpiar el filtro |
 | `e` | Editar el archivo abierto en la TUI |
 | `ctrl+s` | Guardar el borrador |
+| `↑`/`↓`/`←`/`→`, `home`/`end` | Mover el cursor dentro del borrador |
+| rueda, `pgup`/`pgdown` | Desplazar el borrador sin mover el cursor |
+| clic en el borrador | Colocar el cursor en esa posición |
 | `E` / `ctrl+e` | Abrir el archivo en el editor externo (`--editor`) |
 | `esc` (editando) | Volver al preview; con cambios sin guardar pide confirmación (`y` descarta, `n` cancela) |
 
@@ -337,15 +343,22 @@ borran ramas sin confirmación.
 | `pgup`/`pgdown`, `home`/`end` | Moverse por páginas o al principio y al final |
 | `enter` | Leer una muestra de `stats` del contenedor seleccionado |
 | `l` | Abrir los `logs` paginados del contenedor seleccionado |
+| `a` | Alternar entre los contenedores del proyecto y todos los del daemon |
 | `s` / `x` / `R` | `start`, `stop` y `restart` del contenedor seleccionado |
 | `y`/`enter`, `n`/`esc` | Confirmar o cancelar la acción pendiente |
 | `r` | Refrescar la lista (`dev` sin socket reintenta la conexión) |
 | `esc` | Cerrar los `logs` o la confirmación |
 
-La tabla muestra nombre, imagen, estado, health y puertos. `start`, `stop` y
-`restart` nunca se ejecutan sin confirmación y se cancelan con `n`/`esc`. Los
-`logs` usan `Tail=100` y `Follow=false`: nunca hay streaming continuo; `k`/`pgup`
-en la parte superior carga la página anterior con el cursor
+La tabla muestra nombre, imagen, estado, health y puertos. Por defecto solo
+lista los contenedores del proyecto abierto: compara la etiqueta de Compose
+`com.docker.compose.project.working_dir` con la raíz del repositorio y, si esa
+etiqueta falta, cae al nombre del proyecto. `a` alterna a todos los contenedores
+del daemon y conserva la selección; el modo activo aparece en el título y en el
+pie. Si la raíz del repo no se conoce, la lista no se filtra.
+
+`start`, `stop` y `restart` nunca se ejecutan sin confirmación y se cancelan con
+`n`/`esc`. Los `logs` usan `Tail=100` y `Follow=false`: nunca hay streaming
+continuo; `k`/`pgup` en la parte superior carga la página anterior con el cursor
 `Before`/`NextBefore` del adaptador.
 
 ## Arquitectura

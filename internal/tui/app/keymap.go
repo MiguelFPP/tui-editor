@@ -1,5 +1,7 @@
 package app
 
+import "github.com/MiguelFPP/tui-editor/internal/tui/styles"
+
 // binding is one documented root keymap entry, rendered in the help overlay.
 type binding struct {
 	keys string
@@ -19,11 +21,11 @@ var bindings = []binding{
 // helpLines renders the full keymap shown by the help overlay.
 func helpLines() []string {
 	lines := make([]string, 0, len(bindings)+5)
-	lines = append(lines, styles.helpTitle.Render("tui-editor · atajos"))
+	lines = append(lines, styles.HelpTitle.Render("tui-editor · atajos"))
 	lines = append(lines, "")
 
 	for _, b := range bindings {
-		lines = append(lines, styles.helpKey.Render(b.keys)+"  "+b.desc)
+		lines = append(lines, styles.HelpKey.Render(b.keys)+"  "+b.desc)
 	}
 
 	lines = append(lines, "")

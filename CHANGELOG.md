@@ -5,6 +5,40 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.4.0] - 2026-11-19
+
+UI improvements: clickable tabs, syntax highlighting while editing, panel
+frames, and a Docker panel scoped to the open project.
+
+### Added
+
+- The top tabs (`Files`, `Git`, `Docker`) respond to the mouse. A click lands
+  exactly on the drawn label and goes through the same path as the `1`/`2`/`3`
+  keys, so the focus rules and the Docker ticker are unchanged.
+- The Docker panel lists only the containers of the open project by default,
+  matched through the compose `working_dir` label with the project name as a
+  fallback. `a` toggles between the project and every container, keeps the
+  selected one and names the mode in the title and the footer.
+- The draft keeps its syntax highlighting while editing: gutter, colours and
+  tab expansion now come from the same lexer and formatter as the preview.
+- A visible caret in the draft, with its position in the header, wheel
+  scrolling and click-to-position.
+- Every panel sits in a rounded frame; the focused one uses the accent colour.
+
+### Changed
+
+- All colours and style tokens live in `internal/tui/styles`, replacing six
+  duplicated private style structs scattered across the components.
+- The editor opens the draft on the first line instead of the last one.
+
+### Fixed
+
+- A click in the editor landed `treeW` columns and two rows away from the
+  pointer: the root router passed absolute terminal coordinates to a component
+  that reads them as panel-relative.
+
 ## [0.3.2] - 2026-11-19
 
 Installer update fix.
@@ -96,7 +130,9 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
-[0.3.2]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.1...v0.3.2
+[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.1...v0.4.0
+[0.3.2]: https://github.com/MiguelFPP/tui-editor/commit/a9896df
 [0.3.1]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/MiguelFPP/tui-editor/commit/954fcf4
 [0.2.0]: https://github.com/MiguelFPP/tui-editor/commit/cb7629a

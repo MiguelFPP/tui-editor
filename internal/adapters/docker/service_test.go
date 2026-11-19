@@ -201,7 +201,7 @@ func TestUnavailableOperations(t *testing.T) {
 	ctx := context.Background()
 	calls := map[string]func() error{
 		"Ping":       func() error { return service.Ping(ctx) },
-		"Containers": func() error { _, err := service.Containers(ctx); return err },
+		"Containers": func() error { _, err := service.Containers(ctx, domain.ContainerScope{}); return err },
 		"Stats":      func() error { _, err := service.Stats(ctx, "abc"); return err },
 		"Logs":       func() error { _, err := service.Logs(ctx, "abc", domain.LogOptions{}); return err },
 		"Start":      func() error { return service.Start(ctx, "abc") },
@@ -274,7 +274,7 @@ func TestTimeoutBudgets(t *testing.T) {
 
 	run := map[string]func(){
 		"Ping":       func() { _ = service.Ping(ctx) },
-		"Containers": func() { _, _ = service.Containers(ctx) },
+		"Containers": func() { _, _ = service.Containers(ctx, domain.ContainerScope{}) },
 		"Stats":      func() { _, _ = service.Stats(ctx, "abc") },
 		"Logs":       func() { _, _ = service.Logs(ctx, "abc", domain.LogOptions{}) },
 		"Start":      func() { _ = service.Start(ctx, "abc") },
@@ -330,7 +330,7 @@ func TestTimeoutCallerDeadlineWins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), callerBudget)
 	defer cancel()
 
-	_, err := service.Containers(ctx)
+	_, err := service.Containers(ctx, domain.ContainerScope{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Containers() error = %v, want %v", err, context.DeadlineExceeded)
 	}

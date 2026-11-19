@@ -65,7 +65,7 @@ func TestContainersMaps(t *testing.T) {
 
 	service := newService(api, newFakeClock())
 
-	got, err := service.Containers(context.Background())
+	got, err := service.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil {
 		t.Fatalf("Containers() error = %v, want nil", err)
 	}
@@ -141,7 +141,7 @@ func TestContainersLimitsStartProbes(t *testing.T) {
 
 	service := newService(api, newFakeClock())
 
-	got, err := service.Containers(context.Background())
+	got, err := service.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil {
 		t.Fatalf("Containers() error = %v, want nil", err)
 	}
@@ -168,7 +168,7 @@ func TestContainersIgnoresInspectFailures(t *testing.T) {
 
 	service := newService(api, newFakeClock())
 
-	got, err := service.Containers(context.Background())
+	got, err := service.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil {
 		t.Fatalf("Containers() error = %v, want nil", err)
 	}
@@ -185,7 +185,7 @@ func TestContainersEmpty(t *testing.T) {
 
 	service := newService(api, newFakeClock())
 
-	got, err := service.Containers(context.Background())
+	got, err := service.Containers(context.Background(), domain.ContainerScope{})
 	if err != nil {
 		t.Fatalf("Containers() error = %v, want nil", err)
 	}
@@ -202,7 +202,7 @@ func TestContainersTranslateErrors(t *testing.T) {
 
 	service := newService(api, newFakeClock())
 
-	if _, err := service.Containers(context.Background()); err == nil {
+	if _, err := service.Containers(context.Background(), domain.ContainerScope{}); err == nil {
 		t.Error("Containers() error = nil, want un error")
 	}
 }
@@ -225,6 +225,102 @@ func sameSummary(got, want domain.ContainerSummary) bool {
 	}
 
 	return true
+}
+
+func TestContainerSummaryCarriesComposeLabels(t *testing.T) {
+	got := containerSummary(container.Summary{
+		ID: "aaaa",
+		Labels: map[string]string{
+			domain.LabelComposeProject:    "proj",
+			domain.LabelComposeWorkingDir: "/repo/proj",
+		},
+	})
+
+	if got.Project != "proj" {
+		t.Errorf("Project = %q, want %q", got.Project, "proj")
+	}
+	if got.WorkingDir != "/repo/proj" {
+		t.Errorf("WorkingDir = %q, want %q", got.WorkingDir, "/repo/proj")
+	}
+}
+
+func TestContainersFiltersByScope(t *testing.T) {
+	api := &fakeAPI{}
+	api.list = func(_ context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
+		return client.ContainerListResult{Items: []container.Summary{
+			{
+				ID: "aaaa", Names: []string{"/web"}, Image: "nginx", State: container.StateExited,
+				Labels: map[string]string{domain.LabelComposeWorkingDir: "/repo/proj"},
+			},
+			{
+				ID: "bbbb", Names: []string{"/other"}, Image: "redis", State: container.StateExited,
+				Labels: map[string]string{domain.LabelComposeWorkingDir: "/repo/other"},
+			},
+			{ID: "cccc", Names: []string{"/bare"}, Image: "busybox", State: container.StateExited},
+		}}, nil
+	}
+
+	service := newService(api, newFakeClock())
+
+	got, err := service.Containers(context.Background(), domain.ContainerScope{WorkingDir: "/repo/proj"})
+	if err != nil {
+		t.Fatalf("Containers() error = %v, want nil", err)
+	}
+	if len(got) != 1 || got[0].ID != "aaaa" {
+		t.Fatalf("Containers() = %+v, want only aaaa", got)
+	}
+
+	all, err := service.Containers(context.Background(), domain.ContainerScope{})
+	if err != nil {
+		t.Fatalf("Containers() error = %v, want nil", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("Containers() with the zero scope = %d rows, want 3", len(all))
+	}
+}
+
+func TestContainersSkipsProbesOutsideScope(t *testing.T) {
+	items := make([]container.Summary, 0, 20)
+	for i := 0; i < 18; i++ {
+		items = append(items, container.Summary{
+			ID:     fmt.Sprintf("out%02d", i),
+			Names:  []string{fmt.Sprintf("/out-%02d", i)},
+			State:  container.StateRunning,
+			Labels: map[string]string{domain.LabelComposeWorkingDir: "/repo/other"},
+		})
+	}
+	for i := 0; i < 2; i++ {
+		items = append(items, container.Summary{
+			ID:     fmt.Sprintf("in%02d", i),
+			Names:  []string{fmt.Sprintf("/in-%02d", i)},
+			State:  container.StateRunning,
+			Labels: map[string]string{domain.LabelComposeWorkingDir: "/repo/proj"},
+		})
+	}
+
+	inspected := 0
+	api := &fakeAPI{}
+	api.list = func(_ context.Context, _ client.ContainerListOptions) (client.ContainerListResult, error) {
+		return client.ContainerListResult{Items: items}, nil
+	}
+	api.inspect = func(_ context.Context, _ string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+		inspected++
+
+		return client.ContainerInspectResult{}, nil
+	}
+
+	service := newService(api, newFakeClock())
+
+	got, err := service.Containers(context.Background(), domain.ContainerScope{WorkingDir: "/repo/proj"})
+	if err != nil {
+		t.Fatalf("Containers() error = %v, want nil", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Containers() = %d rows, want 2", len(got))
+	}
+	if inspected != 2 {
+		t.Errorf("inspected %d containers, want only the 2 in scope", inspected)
+	}
 }
 
 func mustParseTime(t *testing.T, value string) time.Time {

@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 const (
@@ -18,38 +19,19 @@ const (
 	numberGap     = " "
 )
 
-var diffStyles = struct {
-	header  lipgloss.Style
-	meta    lipgloss.Style
-	gutter  lipgloss.Style
-	added   lipgloss.Style
-	removed lipgloss.Style
-}{
-	header:  plainCells(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7"))),
-	meta:    plainCells(lipgloss.NewStyle().Faint(true)),
-	gutter:  plainCells(lipgloss.NewStyle().Faint(true)),
-	added:   plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a"))),
-	removed: plainCells(lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))),
-}
-
-// plainCells keeps tabs untouched, so coloured output matches the domain text.
-func plainCells(style lipgloss.Style) lipgloss.Style {
-	return style.TabWidth(lipgloss.NoTabConversion)
-}
-
 // RenderDiff renders d as a unified diff; color=false returns plain, stable text.
 func RenderDiff(d domain.Diff, width int, color bool) string {
 	switch {
 	case d.Binary:
-		return styled(diffStyles.meta, fit("diferencia binaria: no se muestra", width), color)
+		return styled(styles.MetaPlain, fit("diferencia binaria: no se muestra", width), color)
 	case d.IsEmpty():
-		return styled(diffStyles.meta, fit("sin cambios", width), color)
+		return styled(styles.MetaPlain, fit("sin cambios", width), color)
 	}
 
 	lines := make([]string, 0, len(d.Hunks)*4+1)
 	for _, hunk := range d.Hunks {
 		oldWidth, newWidth := numberWidths(hunk)
-		lines = append(lines, styled(diffStyles.header, fit(hunkTitle(hunk), width), color))
+		lines = append(lines, styled(styles.DiffHeader, fit(hunkTitle(hunk), width), color))
 
 		for _, line := range hunk.Lines {
 			lines = append(lines, renderLine(line, oldWidth, newWidth, width, color))
@@ -57,7 +39,7 @@ func RenderDiff(d domain.Diff, width int, color bool) string {
 	}
 
 	if d.Truncated {
-		lines = append(lines, styled(diffStyles.meta, fit("diff truncado", width), color))
+		lines = append(lines, styled(styles.MetaPlain, fit("diff truncado", width), color))
 	}
 
 	return strings.Join(lines, "\n")
@@ -76,7 +58,7 @@ func renderLine(line domain.DiffLine, oldWidth, newWidth, width int, color bool)
 		return prefix + body
 	}
 
-	return diffStyles.gutter.Render(prefix) + styled(lineStyle(line.Kind), body, color)
+	return styles.Gutter.Render(prefix) + styled(lineStyle(line.Kind), body, color)
 }
 
 // numberPrefix right-aligns the old and new line numbers; zero means "no number".
@@ -108,13 +90,13 @@ func lineBody(line domain.DiffLine) string {
 func lineStyle(kind domain.DiffLineKind) lipgloss.Style {
 	switch kind {
 	case domain.Added:
-		return diffStyles.added
+		return styles.Added
 	case domain.Removed:
-		return diffStyles.removed
+		return styles.Removed
 	case domain.NoNewline:
-		return diffStyles.meta
+		return styles.MetaPlain
 	default:
-		return plainCells(lipgloss.NewStyle())
+		return styles.PlainCells(lipgloss.NewStyle())
 	}
 }
 
