@@ -5,9 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-11-19
 
-One-line installation scripts.
+One-line installation for every supported platform.
 
 ### Added
 
@@ -18,6 +18,12 @@ One-line installation scripts.
 - `scripts/install.ps1` for Windows: same flow with `amd64`/`arm64` detection,
   checksum verification, install into `%LOCALAPPDATA%\Programs\tui-editor` and
   user `PATH` registration.
+
+### Changed
+
+- The README separates the requirements for running the static binary from the
+  requirements for developing the project, and documents building from source
+  with the ldflags that inject the version.
 
 ### Fixed
 
@@ -76,6 +82,7 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
-[0.3.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/MiguelFPP/tui-editor/releases/tag/v0.1.0
+[0.3.1]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/MiguelFPP/tui-editor/commit/954fcf4
+[0.2.0]: https://github.com/MiguelFPP/tui-editor/commit/cb7629a
+[0.1.0]: https://github.com/MiguelFPP/tui-editor/commit/0dd4538
