@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Configurable themes and keybindings.
+
+### Added
+
+- Theme catalog with Tokyo Night (default), Catppuccin Mocha, Dracula and
+  Gruvbox Dark. `--theme`, `TUI_EDITOR_THEME` and `--list-themes` select the
+  palette; the preview highlighting follows the same Chroma style.
+- Optional JSON configuration at `os.UserConfigDir()/tui-editor/config.json`,
+  overridable with `--config` and `TUI_EDITOR_CONFIG`. It is validated strictly
+  and resolved as `flags > env > file > defaults`.
+- Configurable keybindings for the root, file tree, editor, Git and Docker
+  scopes. `--list-keys` prints every action, its scope, its defaults and
+  whether it can be overridden.
+- Help overlay, status bar and panel footers render the effective keys.
+
+### Changed
+
+- `internal/tui/styles` is now a theme catalog; `styles.Apply` rebuilds every
+  token and the Chroma style used by the preview.
+- Key handling is centralized in `internal/tui/keymap`; components receive the
+  registry through `Deps`.
+- Modal actions and `ctrl+c` remain fixed to avoid locking the user out.
+
+### Fixed
+
+- `git_up`/`git_down`, `docker_up`/`docker_down` and the Docker logs actions now
+  match their names: `j`/`down` moves down and `k`/`up` moves up.
+
 ## [0.4.0] - 2026-11-19
 
 UI improvements: clickable tabs, syntax highlighting while editing, panel
