@@ -2,6 +2,7 @@
   "theme": "catppuccin-mocha",
   "tree_width": 42,
   "tree_collapsed": false,
+  "git_layout": "split",
   "keys": {
     "help": ["h"],
     "tree_down": ["n"],

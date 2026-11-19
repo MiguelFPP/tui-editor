@@ -87,6 +87,9 @@ type Deps struct {
 
 	// SaveLayout persists the tree layout; nil means the layout is not persisted.
 	SaveLayout func(width int, collapsed bool) error
+
+	// SaveGitLayout persists the Git panel layout; nil means it is not persisted.
+	SaveGitLayout func(layout string) error
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -157,7 +160,7 @@ func New(deps Deps) Model {
 		editors:       deps.Editor,
 		keys:          keys,
 		tree:          filetree.New(deps.Files, "", keys),
-		git:           gitpanel.New(deps.Git, keys),
+		git:           gitpanel.NewWithOptions(deps.Git, keys, gitOptions(deps)),
 		docker:        dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
 		tab:           FilesTab,
 		width:         defaultWidth,
@@ -172,6 +175,20 @@ func New(deps Deps) Model {
 	m.resize()
 
 	return m
+}
+
+// gitOptions maps the persisted preference and the save seam onto the panel options.
+func gitOptions(deps Deps) gitpanel.Options {
+	opts := gitpanel.Options{Layout: gitpanel.ParseLayout(deps.Config.GitLayout)}
+	if deps.SaveGitLayout == nil {
+		return opts
+	}
+
+	opts.SaveLayout = func(layout gitpanel.Layout) error {
+		return deps.SaveGitLayout(layout.String())
+	}
+
+	return opts
 }
 
 // Init starts the tree, the Git panel and the spinner.
@@ -217,6 +234,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case layoutSavedMsg:
 		if msg.err != nil {
 			cmds = append(cmds, m.notify(msg.err.Error()))
+		}
+	case gitpanel.LayoutSavedMsg:
+		if msg.Err != nil {
+			cmds = append(cmds, m.notify(msg.Err.Error()))
 		}
 	case filetree.FileChosenMsg:
 		if m.editorDirty() {

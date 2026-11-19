@@ -35,6 +35,7 @@ type Config struct {
 	Keys          map[string][]string
 	TreeWidth     int
 	TreeCollapsed bool
+	GitLayout     string
 	SavePath      string
 }
 
@@ -181,6 +182,9 @@ func loadConfig(configPath, theme string) (Config, error) {
 	if fileCfg.TreeWidth < 0 {
 		return Config{}, fmt.Errorf("%w: tree_width no puede ser negativo", ErrConfigFormat)
 	}
+	if err := validateGitLayout(fileCfg.GitLayout); err != nil {
+		return Config{}, err
+	}
 
 	effectiveTheme := strings.TrimSpace(theme)
 	if effectiveTheme == "" {
@@ -192,6 +196,7 @@ func loadConfig(configPath, theme string) (Config, error) {
 		Keys:          fileCfg.keyOverrides(),
 		TreeWidth:     fileCfg.TreeWidth,
 		TreeCollapsed: fileCfg.TreeCollapsed,
+		GitLayout:     fileCfg.GitLayout,
 	}
 	if loaded {
 		cfg.ConfigPath = path
@@ -201,6 +206,16 @@ func loadConfig(configPath, theme string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// validateGitLayout accepts the empty default plus the two persisted names.
+func validateGitLayout(layout string) error {
+	switch strings.TrimSpace(layout) {
+	case "", "split", "single":
+		return nil
+	default:
+		return fmt.Errorf("%w: git_layout %q no es válido; usa \"split\" o \"single\"", ErrConfigFormat, layout)
+	}
 }
 
 // resolveInitPath returns the destination of --init-config. Unlike loadConfig it

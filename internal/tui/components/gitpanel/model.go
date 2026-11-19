@@ -124,6 +124,11 @@ func ParseLayout(raw string) Layout {
 	return LayoutSplit
 }
 
+// LayoutSavedMsg reports the result of persisting the layout preference.
+type LayoutSavedMsg struct {
+	Err error
+}
+
 // statusLoadedMsg carries one refresh of the working tree.
 type statusLoadedMsg struct {
 	seq    int
@@ -235,6 +240,9 @@ type Model struct {
 	highlighted  []string
 	highlightKey string
 
+	// saveLayout persists the layout preference; nil means it is not persisted.
+	saveLayout func(Layout) error
+
 	help bool
 }
 
@@ -315,24 +323,31 @@ type seqState struct {
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
 // falls back to the built-in defaults.
 func New(git ports.GitService, keys keymap.Registry) Model {
-	return NewWithLayout(git, keys, LayoutSplit)
+	return NewWithOptions(git, keys, Options{})
 }
 
-// NewWithLayout builds the panel with the persisted layout preference.
-func NewWithLayout(git ports.GitService, keys keymap.Registry, layout Layout) Model {
+// Options configures the panel at construction.
+type Options struct {
+	Layout     Layout
+	SaveLayout func(Layout) error
+}
+
+// NewWithOptions builds the panel with the persisted layout and the save seam.
+func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Model {
 	if len(keys.All()) == 0 {
 		keys = keymap.Default()
 	}
 
 	m := Model{
-		git:     git,
-		keys:    keys,
-		layout:  layout,
-		loading: loadingState{status: true, branches: true},
-		seqs:    seqState{status: 1, branches: 1},
-		marked:  make(map[int]bool),
-		commit:  newCommitModal(defaultWidth, defaultHeight),
-		prompt:  newPromptModal(promptNone, defaultWidth),
+		git:        git,
+		keys:       keys,
+		layout:     opts.Layout,
+		saveLayout: opts.SaveLayout,
+		loading:    loadingState{status: true, branches: true},
+		seqs:       seqState{status: 1, branches: 1},
+		marked:     make(map[int]bool),
+		commit:     newCommitModal(defaultWidth, defaultHeight),
+		prompt:     newPromptModal(promptNone, defaultWidth),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 

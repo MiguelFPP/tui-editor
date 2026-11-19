@@ -94,6 +94,7 @@ type configOutput struct {
 	Theme         string              `json:"theme"`
 	TreeWidth     int                 `json:"tree_width"`
 	TreeCollapsed bool                `json:"tree_collapsed"`
+	GitLayout     string              `json:"git_layout"`
 	Keys          map[string][]string `json:"keys"`
 }
 
@@ -149,7 +150,7 @@ func TestInitConfigTemplateHasTreeLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
-	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`} {
+	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`, `"git_layout"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("template = %q, want %s", body, want)
 		}
@@ -173,6 +174,7 @@ func TestPrintConfig(t *testing.T) {
 		Theme:         "dracula",
 		TreeWidth:     42,
 		TreeCollapsed: true,
+		GitLayout:     "single",
 		Keys:          map[string][]string{"quit": {"q", "c"}, "docker_logs": {"o"}},
 	}
 
@@ -193,6 +195,9 @@ func TestPrintConfig(t *testing.T) {
 	if !got.TreeCollapsed {
 		t.Error("tree_collapsed = false, want true")
 	}
+	if got.GitLayout != "single" {
+		t.Errorf("git_layout = %q, want %q", got.GitLayout, "single")
+	}
 	if !slices.Equal(got.Keys["quit"], []string{"q", "c"}) {
 		t.Errorf("keys[quit] = %v, want [q c]", got.Keys["quit"])
 	}
@@ -204,9 +209,9 @@ func TestPrintConfig(t *testing.T) {
 	}
 
 	// The field order stays stable: config_path, theme, tree_width,
-	// tree_collapsed, keys.
+	// tree_collapsed, git_layout, keys.
 	last := -1
-	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"keys"`} {
+	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"keys"`} {
 		index := strings.Index(out.String(), key)
 		if index < 0 {
 			t.Fatalf("salida no incluye %s: %q", key, out.String())
@@ -235,6 +240,9 @@ func TestPrintConfigDefaultTheme(t *testing.T) {
 	}
 	if got.TreeCollapsed {
 		t.Error("tree_collapsed = true, want false")
+	}
+	if got.GitLayout != "split" {
+		t.Errorf("git_layout = %q, want the split default", got.GitLayout)
 	}
 	if got.Keys == nil {
 		t.Error("keys = nil, want an empty object")

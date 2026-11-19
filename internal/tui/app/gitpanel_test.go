@@ -142,7 +142,9 @@ func TestGitPanelClickPicksTheHunkUnderTheCursor(t *testing.T) {
 		return twoHunkDiff(req.Path), nil
 	}
 
-	m := newSized(t, deps, 120, 40)
+	// Below the split threshold the list and the diff share one column, so a click on a row maps
+	// directly to the hunk under it.
+	m := newSized(t, deps, 99, 40)
 	m = drain(t, m, m.Init())
 	m = update(t, m, typed('2'))
 

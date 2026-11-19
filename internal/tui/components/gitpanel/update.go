@@ -200,9 +200,32 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.back()
 	case keymap.ActionGitHelp:
 		m.help = !m.help
+	case keymap.ActionGitLayoutToggle:
+		return m.toggleLayout()
 	}
 
 	return nil
+}
+
+// toggleLayout alternates between one and two columns and persists the choice.
+func (m *Model) toggleLayout() tea.Cmd {
+	if m.layout == LayoutSingle {
+		m.layout = LayoutSplit
+	} else {
+		m.layout = LayoutSingle
+	}
+
+	m.scrollList, m.scrollPreview = 0, 0
+	m.sync()
+
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	layout := m.layout
+
+	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout)} }
 }
 
 // stageKey stages the selected file, or the marked hunks of the worktree diff.

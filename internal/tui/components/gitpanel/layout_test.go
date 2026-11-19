@@ -1,7 +1,10 @@
 package gitpanel
 
 import (
+	"errors"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
@@ -60,7 +63,7 @@ func TestSplitBySection(t *testing.T) {
 
 // TestSplitRespectsThePersistedPreference checks that single wins over a wide terminal.
 func TestSplitRespectsThePersistedPreference(t *testing.T) {
-	m := NewWithLayout(gitFake(t), keymap.Registry{}, LayoutSingle)
+	m := NewWithOptions(gitFake(t), keymap.Registry{}, Options{Layout: LayoutSingle})
 	m.SetSize(200, 30)
 
 	if m.split {
@@ -168,5 +171,98 @@ func TestSplitSurvivesResize(t *testing.T) {
 		if m.split != step.want {
 			t.Fatalf("width %d: split = %v, want %v", step.width, m.split, step.want)
 		}
+	}
+}
+
+// TestLayoutToggleFlipsThePreference checks the L action and its persistence.
+func TestLayoutToggleFlipsThePreference(t *testing.T) {
+	var saved []Layout
+
+	m := NewWithOptions(gitFake(t), keymap.Default(), Options{
+		Layout:     LayoutSplit,
+		SaveLayout: func(layout Layout) error { saved = append(saved, layout); return nil },
+	})
+	m.SetSize(120, 20)
+
+	if !m.split {
+		t.Fatal("the panel must start split at 120 cells")
+	}
+
+	next, cmd := m.Update(key('L'))
+	if next.layout != LayoutSingle {
+		t.Errorf("layout = %v, want single", next.layout)
+	}
+	if next.split {
+		t.Error("split = true, want the single column after the toggle")
+	}
+	if !next.savedLayout(t, cmd) {
+		return
+	}
+
+	next, cmd = next.Update(key('L'))
+	if !next.split || next.layout != LayoutSplit {
+		t.Fatalf("second toggle left layout = %v, split = %v", next.layout, next.split)
+	}
+	next.savedLayout(t, cmd)
+
+	want := []Layout{LayoutSingle, LayoutSplit}
+	if len(saved) != len(want) || saved[0] != want[0] || saved[1] != want[1] {
+		t.Errorf("saved = %v, want %v", saved, want)
+	}
+}
+
+// savedLayout drains the save command and reports whether it succeeded.
+func (m Model) savedLayout(t *testing.T, cmd tea.Cmd) bool {
+	t.Helper()
+
+	if cmd == nil {
+		t.Fatal("the toggle returned no save command")
+	}
+	msg, ok := cmd().(LayoutSavedMsg)
+	if !ok {
+		t.Fatalf("the toggle returned %T, want LayoutSavedMsg", cmd())
+	}
+	if msg.Err != nil {
+		t.Fatalf("LayoutSavedMsg.Err = %v, want nil", msg.Err)
+	}
+
+	return true
+}
+
+// TestLayoutToggleWithoutSaverIsSafe covers the test wiring with no file to write.
+func TestLayoutToggleWithoutSaverIsSafe(t *testing.T) {
+	m := NewWithOptions(gitFake(t), keymap.Default(), Options{Layout: LayoutSplit})
+	m.SetSize(120, 20)
+
+	next, cmd := m.Update(key('L'))
+	if cmd != nil {
+		t.Errorf("the toggle returned %v, want no command without a saver", cmd())
+	}
+	if next.layout != LayoutSingle {
+		t.Errorf("layout = %v, want single", next.layout)
+	}
+}
+
+// TestLayoutSavedMsgCarriesTheFailure lets the root report a write error.
+func TestLayoutSavedMsgCarriesTheFailure(t *testing.T) {
+	boom := errors.New("disco lleno")
+
+	m := NewWithOptions(gitFake(t), keymap.Default(), Options{
+		Layout:     LayoutSplit,
+		SaveLayout: func(Layout) error { return boom },
+	})
+	m.SetSize(120, 20)
+
+	next, cmd := m.Update(key('L'))
+	if next.layout != LayoutSingle {
+		t.Errorf("layout = %v, want the toggle applied even when the save fails", next.layout)
+	}
+
+	msg, ok := cmd().(LayoutSavedMsg)
+	if !ok {
+		t.Fatalf("the toggle returned %T, want LayoutSavedMsg", cmd())
+	}
+	if !errors.Is(msg.Err, boom) {
+		t.Errorf("Err = %v, want %v", msg.Err, boom)
 	}
 }
