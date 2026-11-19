@@ -174,6 +174,17 @@ type diffLoadedMsg struct {
 	err  error
 }
 
+// sidesLoadedMsg carries the real content of both sides of one diff.
+type sidesLoadedMsg struct {
+	seq    int
+	path   domain.RelPath
+	staged bool
+	old    domain.RevisionContent
+	new    domain.RevisionContent
+	oldErr error
+	newErr error
+}
+
 // writeDoneMsg carries the outcome of one write, plus the notice a network write leaves behind.
 type writeDoneMsg struct {
 	seq    int
@@ -186,8 +197,9 @@ var errNoService = errors.New("gitpanel: servicio de git no configurado")
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {
-	git  ports.GitService
-	keys keymap.Registry
+	git   ports.GitService
+	files ports.FileService
+	keys  keymap.Registry
 
 	section Section
 	cursors [sectionCount]int
@@ -208,6 +220,9 @@ type Model struct {
 	diffLines  []string
 	hunkCursor int
 	marked     map[int]bool
+
+	// sides is the real content of both sides of the loaded diff.
+	sides diffSides
 
 	writing  bool
 	writeOp  string
@@ -335,7 +350,26 @@ type seqState struct {
 	stashes  int
 	history  int
 	diff     int
+	sides    int
 	write    int
+}
+
+// sideSource says where one side of the diff is read from.
+type sideSource struct {
+	rev      domain.FileRev
+	worktree bool
+}
+
+// diffSides is the real text of both sides of the loaded diff; ok is false when a side has none.
+type diffSides struct {
+	path    domain.RelPath
+	staged  bool
+	oldPath domain.RelPath
+	newPath domain.RelPath
+	old     string
+	new     string
+	oldOK   bool
+	newOK   bool
 }
 
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
@@ -346,6 +380,8 @@ func New(git ports.GitService, keys keymap.Registry) Model {
 
 // Options configures the panel at construction.
 type Options struct {
+	// Files reads the worktree, so both sides of a diff can be highlighted exactly.
+	Files         ports.FileService
 	Layout        Layout
 	ListWidth     int
 	ListCollapsed bool
@@ -360,6 +396,7 @@ func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Mo
 
 	m := Model{
 		git:           git,
+		files:         opts.Files,
 		keys:          keys,
 		layout:        opts.Layout,
 		listWidth:     max(opts.ListWidth, 0),
@@ -557,6 +594,25 @@ func (m Model) previewSpans() []rowSpan {
 	}
 
 	return diffSpans(m.diff)
+}
+
+// sidePaths resolves the path of each side; a rename reads its pre-image.
+func sidePaths(d domain.Diff) (domain.RelPath, domain.RelPath) {
+	old := d.OrigPath
+	if old.IsZero() {
+		old = d.Path
+	}
+
+	return old, d.Path
+}
+
+// sideSources picks the revision of each side from the staged mode.
+func sideSources(staged bool) (sideSource, sideSource) {
+	if staged {
+		return sideSource{rev: domain.RevHead}, sideSource{rev: domain.RevIndex}
+	}
+
+	return sideSource{rev: domain.RevIndex}, sideSource{worktree: true}
 }
 
 // alignedSpans is diffSpans for the side-by-side layout: each hunk is its title plus its aligned

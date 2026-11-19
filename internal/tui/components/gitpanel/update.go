@@ -28,7 +28,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case historyLoadedMsg:
 		m.applyHistory(msg)
 	case diffLoadedMsg:
-		m.applyDiff(msg)
+		return m, m.applyDiff(msg)
+	case sidesLoadedMsg:
+		m.applySides(msg)
 	case writeDoneMsg:
 		return m, m.applyWriteDone(msg)
 	case tea.KeyPressMsg:
@@ -1103,9 +1105,9 @@ func (m *Model) applyHistory(msg historyLoadedMsg) {
 	m.clamp(History)
 }
 
-func (m *Model) applyDiff(msg diffLoadedMsg) {
+func (m *Model) applyDiff(msg diffLoadedMsg) tea.Cmd {
 	if msg.seq != m.seqs.diff {
-		return
+		return nil
 	}
 
 	m.loading.diff = false
@@ -1118,8 +1120,86 @@ func (m *Model) applyDiff(msg diffLoadedMsg) {
 		m.diff = msg.diff
 	}
 
+	sides := m.loadSides(m.diff) // resets the previous sides before the preview is rendered
 	m.sync()
 	m.clamp(Diff)
+
+	return sides
+}
+
+// loadSides reads the real content of both sides of d through a command, never inline.
+func (m *Model) loadSides(d domain.Diff) tea.Cmd {
+	m.sides = diffSides{}
+	m.seqs.sides++
+
+	if m.files == nil || d.Binary || d.IsEmpty() {
+		return nil
+	}
+
+	seq := m.seqs.sides
+	oldPath, newPath := sidePaths(d)
+	oldSrc, newSrc := sideSources(d.Staged)
+	git, files := m.git, m.files
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+
+		old, oldErr := readSide(ctx, git, files, oldSrc, oldPath)
+		content, newErr := readSide(ctx, git, files, newSrc, newPath)
+
+		return sidesLoadedMsg{
+			seq: seq, path: d.Path, staged: d.Staged,
+			old: old, new: content, oldErr: oldErr, newErr: newErr,
+		}
+	}
+}
+
+// readSide reads one side from its git revision or from the worktree.
+func readSide(ctx context.Context, git ports.GitService, files ports.FileService, src sideSource, path domain.RelPath) (domain.RevisionContent, error) {
+	if src.worktree {
+		if files == nil {
+			return domain.RevisionContent{}, errNoService
+		}
+
+		content, err := files.ReadFile(ctx, path)
+		if err != nil {
+			return domain.RevisionContent{}, err
+		}
+
+		return domain.RevisionContent{Path: path, Text: content.Text, Truncated: content.Truncated}, nil
+	}
+
+	if git == nil {
+		return domain.RevisionContent{}, errNoService
+	}
+
+	return git.FileAt(ctx, src.rev, path)
+}
+
+// applySides stores the loaded content, tolerating the sides that legitimately have none.
+func (m *Model) applySides(msg sidesLoadedMsg) {
+	if msg.seq != m.seqs.sides {
+		return
+	}
+	if msg.path != m.request.Path || msg.staged != m.request.Staged {
+		return
+	}
+
+	oldPath, newPath := sidePaths(m.diff)
+
+	m.sides = diffSides{
+		path:    msg.path,
+		staged:  msg.staged,
+		oldPath: oldPath,
+		newPath: newPath,
+		old:     msg.old.Text,
+		new:     msg.new.Text,
+		oldOK:   msg.oldErr == nil,
+		newOK:   msg.newErr == nil,
+	}
+
+	m.sync()
 }
 
 // writeTimeoutFor bounds one write; the operations that talk to a remote get a longer budget.
