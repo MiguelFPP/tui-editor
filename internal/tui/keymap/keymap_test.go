@@ -9,6 +9,7 @@ import (
 // expectedActions is the catalog in display order; it also fixes the size.
 var expectedActions = []Action{
 	ActionQuit, ActionHelp, ActionConfig, ActionTabFiles, ActionTabGit, ActionTabDocker, ActionFocusNext, ActionFocusPrev,
+	ActionToggleTree, ActionTreeShrink, ActionTreeGrow,
 
 	ActionTreeUp, ActionTreeDown, ActionTreePageUp, ActionTreePageDown, ActionTreeHome, ActionTreeEnd,
 	ActionTreeExpand, ActionTreeCollapse, ActionTreeActivate, ActionTreeFilter, ActionTreeClearFilter,
@@ -466,8 +467,8 @@ func TestAllAndConfigurableReturnCopiesAndCounts(t *testing.T) {
 	}
 
 	configurable := registry.Configurable()
-	if len(configurable) != 60 {
-		t.Errorf("Configurable() = %d bindings, want 60", len(configurable))
+	if len(configurable) != 63 {
+		t.Errorf("Configurable() = %d bindings, want 63", len(configurable))
 	}
 	for _, binding := range configurable {
 		if !binding.Configurable {
