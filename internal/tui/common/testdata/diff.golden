@@ -1,0 +1,10 @@
+@@ -12,5 +12,6 @@ func (m Model) Update(
+12 12 │  	switch msg := msg.(type) {
+13    │ -	case tea.KeyMsg:
+   13 │ +	case tea.KeyPressMsg:
+   14 │ +	case tea.MouseWheelMsg:
+14 15 │  	}
+      │ \ No newline at end of file
+@@ -40,2 +42,3 @@
+40 42 │  	return m, nil
+   43 │ +// fin

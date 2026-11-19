@@ -1,0 +1,12 @@
+diff --git code.go code.go
+index 46fe6dc..31626ce 100644
+--- code.go
++++ code.go
+@@ -4,6 +4,6 @@ import "fmt"
+ 
+ func main() {
+ 	fmt.Println("hola")
+-	fmt.Println("mundo")
++	fmt.Println("MUNDO")
+ 	fmt.Println("chau")
+ }

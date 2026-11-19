@@ -1,0 +1,16 @@
+git · rama main · origin/main · ↑2 · ↓1 · 5 cambios · 1 conflicto · o/t/A
+Cambios │ Diff │ Ramas │ Stash │ Historial
+A. staged.txt
+.M normal.txt
+?? nuevo.txt · sin seguimiento
+R. renamed space.txt · renombrado desde with space.txt
+UU conflict.txt · conflicto
+
+
+
+
+
+
+
+
+tab: sección · j/k: mover · enter: diff del archivo · s: preparar · u: quitar ·…

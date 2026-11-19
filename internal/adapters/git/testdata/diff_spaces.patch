@@ -1,0 +1,7 @@
+diff --git with space.txt with space.txt
+index 603cc9a..b32b63d 100644
+--- with space.txt	
++++ with space.txt	
+@@ -1 +1 @@
+-espacios
++espacios cambiado
