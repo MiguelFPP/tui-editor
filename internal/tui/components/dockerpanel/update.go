@@ -119,9 +119,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch action {
 	case keymap.ActionDockerUp:
-		m.moveCursor(1)
-	case keymap.ActionDockerDown:
 		m.moveCursor(-1)
+	case keymap.ActionDockerDown:
+		m.moveCursor(1)
 	case keymap.ActionDockerPageDown:
 		m.moveCursor(m.bodyHeight())
 	case keymap.ActionDockerPageUp:
@@ -267,9 +267,9 @@ func (m *Model) handleLogsKey(msg tea.KeyPressMsg) tea.Cmd {
 
 		return m.loadLogs()
 	case keymap.ActionDockerLogsUp:
-		m.viewport.ScrollDown(1)
-	case keymap.ActionDockerLogsDown:
 		return m.scrollLogsUp(1)
+	case keymap.ActionDockerLogsDown:
+		m.viewport.ScrollDown(1)
 	case keymap.ActionDockerLogsPageDown:
 		m.viewport.PageDown()
 	case keymap.ActionDockerLogsPageUp:

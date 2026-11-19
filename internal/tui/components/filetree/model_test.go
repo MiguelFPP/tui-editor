@@ -708,3 +708,25 @@ func TestLoadingAndErrReportFailures(t *testing.T) {
 		t.Errorf("Err() = %v, want %v", m.Err(), domain.ErrPermissionDenied)
 	}
 }
+
+// TestKeymapOverrideReachesTheFilterHeader checks that the header names the effective filter key,
+// both while the filter is being typed and once it is applied.
+func TestKeymapOverrideReachesTheFilterHeader(t *testing.T) {
+	m := loadRootWith(t, treeFake(t), overrideKeys(t, map[string][]string{"tree_filter": {"f"}}))
+
+	m, _ = m.Update(typed('f'))
+	for _, r := range "go" {
+		m, _ = m.Update(typed(r))
+	}
+	if view := plain(m.View()); !strings.Contains(view, "fgo") {
+		t.Errorf("View() = %q, want the effective filter key while typing", view)
+	}
+
+	m, _ = m.Update(key(tea.KeyEnter))
+	if got := m.Filter(); got != "go" {
+		t.Fatalf("Filter() = %q, want %q", got, "go")
+	}
+	if view := plain(m.View()); !strings.Contains(view, "filtro: fgo") {
+		t.Errorf("View() = %q, want the effective filter key of the applied filter", view)
+	}
+}

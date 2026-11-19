@@ -566,8 +566,8 @@ func TestToggleStagedReloadsTheLoadedDiff(t *testing.T) {
 	}
 
 	m = press(t, m, key(tea.KeyTab))
-	if view := plain(m.View()); !strings.Contains(view, "d: staged") {
-		t.Errorf("View() = %q, want the staged marker in the footer", view)
+	if footer := m.footerText(); !strings.Contains(footer, "d: staged") {
+		t.Errorf("footer = %q, want the staged marker", footer)
 	}
 
 	m = press(t, m, key('d'))
@@ -1450,7 +1450,7 @@ func TestHelpAndFooterDocumentTheWriteKeys(t *testing.T) {
 
 	m = press(t, m, key('?'))
 	view := plain(m.View())
-	for _, want := range []string{"preparar el archivo", "quitar el archivo", "abrir el editor", "espacio", "commit: ctrl+s"} {
+	for _, want := range []string{"preparar el archivo", "quitar el archivo", "abrir el editor", "space", "commit: ctrl+s"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("View() = %q, want %q", view, want)
 		}
@@ -1660,4 +1660,28 @@ func TestKeymapOverridesKeepTheModalKeysFixed(t *testing.T) {
 			t.Fatalf("DeleteBranch calls after y = %d, want 1", got)
 		}
 	})
+}
+
+// TestKeymapOverridesReachTheFooterAndTheHelp checks that the footer and the help of the panel
+// document the effective keys, never the built-in ones.
+func TestKeymapOverridesReachTheFooterAndTheHelp(t *testing.T) {
+	m := openWith(t, gitFake(t), overrideKeys(t, map[string][]string{"git_stage": {"w"}}))
+	m.SetSize(100, 20)
+
+	footer := m.footerText()
+	if !strings.Contains(footer, "w: preparar") {
+		t.Errorf("footer = %q, want the reassigned stage key", footer)
+	}
+	if strings.Contains(footer, "s: preparar") {
+		t.Errorf("footer = %q, want the default stage key replaced", footer)
+	}
+
+	m = press(t, m, key('?'))
+	view := plain(m.View())
+	if !strings.Contains(view, "w / u") || strings.Contains(view, "s / u") {
+		t.Errorf("View() = %q, want the reassigned stage key in the help", view)
+	}
+	if !strings.Contains(view, "preparar el archivo") {
+		t.Errorf("View() = %q, want the description of the reassigned action kept", view)
+	}
 }

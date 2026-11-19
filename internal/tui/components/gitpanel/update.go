@@ -116,9 +116,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case keymap.ActionGitSectionPrev:
 		return m.goSection(-1)
 	case keymap.ActionGitUp:
-		m.moveCursor(1)
-	case keymap.ActionGitDown:
 		m.moveCursor(-1)
+	case keymap.ActionGitDown:
+		m.moveCursor(1)
 	case keymap.ActionGitActivate:
 		return m.activate()
 	case keymap.ActionGitDiff:

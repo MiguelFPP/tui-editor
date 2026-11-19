@@ -396,6 +396,33 @@ func TestLogsScrollsWithKeyboardAndWheel(t *testing.T) {
 	}
 }
 
+// TestLogsKeysFollowThePhysicalDirection proves the swapped action ids do not change the keys a user
+// presses: j/down scroll the viewport down and k/up scroll it up.
+func TestLogsKeysFollowThePhysicalDirection(t *testing.T) {
+	lines := make([]domain.LogLine, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, domain.LogLine{Text: fmt.Sprintf("línea-%02d", i)})
+	}
+
+	m := openLogs(t, loaded(t, withLogs(fakes.NewDockerService(), domain.LogPage{Lines: lines})))
+
+	for _, msg := range []tea.KeyPressMsg{typed('j'), key(tea.KeyDown)} {
+		down, _ := m.Update(msg)
+		if down.viewport.YOffset() <= m.viewport.YOffset() {
+			t.Errorf("%q: offset = %d, want more than %d", msg.String(), down.viewport.YOffset(), m.viewport.YOffset())
+		}
+		m = down
+	}
+
+	for _, msg := range []tea.KeyPressMsg{typed('k'), key(tea.KeyUp)} {
+		up, _ := m.Update(msg)
+		if up.viewport.YOffset() >= m.viewport.YOffset() {
+			t.Errorf("%q: offset = %d, want less than %d", msg.String(), up.viewport.YOffset(), m.viewport.YOffset())
+		}
+		m = up
+	}
+}
+
 func TestLogsCapturesTheKeyboard(t *testing.T) {
 	m := openLogs(t, loaded(t, withLogs(fakes.NewDockerService(), domain.LogPage{})))
 
@@ -893,4 +920,28 @@ func TestKeymapOverridesKeepTheModalKeysFixed(t *testing.T) {
 			t.Error("esc did not close the logs")
 		}
 	})
+}
+
+// TestKeymapOverridesReachTheFooterAndTheLogs checks that the footer of the panel and the hints of
+// the logs render the effective keys, never the built-in ones.
+func TestKeymapOverridesReachTheFooterAndTheLogs(t *testing.T) {
+	keys := overrideKeys(t, map[string][]string{"docker_logs": {"o"}})
+	docker := withLogs(fakes.NewDockerService(), domain.LogPage{Lines: []domain.LogLine{{Text: "uno"}}})
+	m := loadedWith(t, docker, keys)
+
+	footer := m.footerText()
+	if !strings.Contains(footer, "o: logs") {
+		t.Errorf("footer = %q, want the reassigned logs key", footer)
+	}
+	if strings.Contains(footer, "l: logs") {
+		t.Errorf("footer = %q, want the default logs key replaced", footer)
+	}
+
+	m = feed(t, m, typed('o'))
+	if !m.logsOpen {
+		t.Fatal("o did not open the logs")
+	}
+	if view := m.View(); !strings.Contains(view, "esc: cerrar · r: recargar") {
+		t.Errorf("View() = %q, want the hints of the logs viewport", view)
+	}
 }

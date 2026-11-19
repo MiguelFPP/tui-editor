@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -187,10 +188,10 @@ func (m Model) statusLine(width int) string {
 		"repo: " + m.repoLabel(),
 		"tab: " + m.tab.String(),
 		"foco: " + m.focusLabel(),
-		"1/2/3 tabs",
-		"tab foco",
-		"? ayuda",
-		"q salir",
+		m.tabsHint(),
+		m.keys.Label(keymap.ActionFocusNext) + " foco",
+		m.keys.Label(keymap.ActionHelp) + " ayuda",
+		m.keys.Label(keymap.ActionQuit) + " salir",
 	}
 
 	text := strings.Join(parts, " · ")
@@ -204,9 +205,21 @@ func (m Model) statusLine(width int) string {
 	return styles.Status.Render(clipCells(text, width))
 }
 
+// tabsHint names the keys that switch the top tabs, in tab order.
+func (m Model) tabsHint() string {
+	actions := [...]keymap.Action{keymap.ActionTabFiles, keymap.ActionTabGit, keymap.ActionTabDocker}
+
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, m.keys.Label(action))
+	}
+
+	return strings.Join(labels, "/") + " tabs"
+}
+
 // helpOverlay centers the help box over the layout without changing its size.
 func (m Model) helpOverlay(base string, width, height int) string {
-	box := styles.Help.Render(strings.Join(helpLines(), "\n"))
+	box := styles.Help.Render(strings.Join(helpLines(m.keys), "\n"))
 	boxLines := strings.Split(box, "\n")
 
 	left := max((width-lipgloss.Width(box))/2, 0)

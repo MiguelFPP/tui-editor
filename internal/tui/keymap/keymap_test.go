@@ -76,6 +76,52 @@ func TestDefaultCatalogHasTheExpectedActions(t *testing.T) {
 	}
 }
 
+// TestDockerLogsKeysFollowTheScrollDirection pins the logs bindings to the physical direction: k/up
+// scroll up (and load the older page at the top) while j/down scroll down.
+func TestDockerLogsKeysFollowTheScrollDirection(t *testing.T) {
+	registry := Default()
+
+	descs := make(map[Action]string)
+	for _, binding := range registry.Bindings(ScopeDockerLogs) {
+		descs[binding.Action] = binding.Desc
+	}
+
+	cases := []struct {
+		name   string
+		action Action
+		keys   []string
+		desc   string
+	}{
+		{name: "subir", action: ActionDockerLogsUp, keys: []string{"k", "up"}, desc: "subir"},
+		{name: "bajar", action: ActionDockerLogsDown, keys: []string{"j", "down"}, desc: "bajar"},
+	}
+
+	for _, tc := range cases {
+		if got := registry.Keys(tc.action); !slices.Equal(got, tc.keys) {
+			t.Errorf("%s: Keys(%q) = %v, want %v", tc.name, tc.action, got, tc.keys)
+		}
+		if got := descs[tc.action]; got != tc.desc {
+			t.Errorf("%s: Desc(%q) = %q, want %q", tc.name, tc.action, got, tc.desc)
+		}
+	}
+
+	matches := []struct {
+		key  string
+		want Action
+	}{
+		{key: "k", want: ActionDockerLogsUp},
+		{key: "up", want: ActionDockerLogsUp},
+		{key: "j", want: ActionDockerLogsDown},
+		{key: "down", want: ActionDockerLogsDown},
+	}
+
+	for _, tc := range matches {
+		if action, ok := registry.Match(ScopeDockerLogs, tc.key); !ok || action != tc.want {
+			t.Errorf("Match(docker_logs, %q) = (%q, %v), want (%q, true)", tc.key, action, ok, tc.want)
+		}
+	}
+}
+
 func TestApplyWithNoOverridesKeepsTheDefaults(t *testing.T) {
 	registry := Default()
 

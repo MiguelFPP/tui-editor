@@ -14,9 +14,12 @@ import (
 
 // Config is the validated runtime configuration of the TUI. ConfigPath and Keys
 // come from the optional JSON file; Theme may stay empty for main to apply its
-// default.
+// default. ListThemes and ListKeys ask main to print a catalog and exit, so no
+// other validation runs for them.
 type Config struct {
 	ShowVersion bool
+	ListThemes  bool
+	ListKeys    bool
 	Repo        string
 	Editor      string
 	DockerHost  string
@@ -31,6 +34,8 @@ const Usage = `usage: tui-editor [flags]
 
 flags:
   --version          print the version and exit
+  --list-themes      lista los temas disponibles y sale
+  --list-keys        lista las acciones y sus teclas por defecto y sale
   --repo DIR         repository root, default: current directory
   --editor CMD       editor command, default: $EDITOR or vim
   --docker-host URL  Docker daemon endpoint, default: $DOCKER_HOST
@@ -76,6 +81,8 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	flags.Usage = func() {}
 
 	showVersion := flags.Bool("version", false, "muestra la versión y sale")
+	listThemes := flags.Bool("list-themes", false, "lista los temas disponibles y sale")
+	listKeys := flags.Bool("list-keys", false, "lista las acciones y sus teclas y sale")
 	repo := flags.String("repo", workDir, "directorio raíz del repositorio")
 	editor := flags.String("editor", editorDefault(getenv), "comando del editor externo")
 	dockerHost := flags.String("docker-host", strings.TrimSpace(getenv("DOCKER_HOST")), "endpoint del daemon Docker")
@@ -88,6 +95,10 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	}
 	if *showVersion {
 		return Config{ShowVersion: true}, nil
+	}
+	// The catalogs are static, so neither the file nor the other flags matter.
+	if *listThemes || *listKeys {
+		return Config{ListThemes: *listThemes, ListKeys: *listKeys}, nil
 	}
 	if flags.NArg() > 0 {
 		return Config{}, fmt.Errorf("argumento no esperado %q", flags.Arg(0))

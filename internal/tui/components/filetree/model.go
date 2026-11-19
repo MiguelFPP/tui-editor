@@ -543,9 +543,9 @@ func (m Model) headerLine() (string, bool) {
 	case m.err != nil:
 		return styles.Fail.Render("error: " + m.err.Error()), true
 	case m.filtering:
-		return styles.Meta.Render("/" + m.filter + "▏"), true
+		return styles.Meta.Render(m.keys.Label(keymap.ActionTreeFilter) + m.filter + "▏"), true
 	case m.filter != "":
-		return styles.Meta.Render("filtro: /" + m.filter), true
+		return styles.Meta.Render("filtro: " + m.keys.Label(keymap.ActionTreeFilter) + m.filter), true
 	default:
 		return "", false
 	}

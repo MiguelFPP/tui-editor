@@ -310,8 +310,8 @@ var catalog = []Binding{
 	// git
 	{Action: ActionGitSectionNext, Scope: ScopeGit, Keys: []string{"tab"}, Desc: "siguiente sección", Configurable: true},
 	{Action: ActionGitSectionPrev, Scope: ScopeGit, Keys: []string{"shift+tab"}, Desc: "sección anterior", Configurable: true},
-	{Action: ActionGitUp, Scope: ScopeGit, Keys: []string{"j", "down"}, Desc: "subir", Configurable: true},
-	{Action: ActionGitDown, Scope: ScopeGit, Keys: []string{"k", "up"}, Desc: "bajar", Configurable: true},
+	{Action: ActionGitUp, Scope: ScopeGit, Keys: []string{"k", "up"}, Desc: "subir", Configurable: true},
+	{Action: ActionGitDown, Scope: ScopeGit, Keys: []string{"j", "down"}, Desc: "bajar", Configurable: true},
 	{Action: ActionGitActivate, Scope: ScopeGit, Keys: []string{"enter"}, Desc: "abrir selección", Configurable: true},
 	{Action: ActionGitDiff, Scope: ScopeGit, Keys: []string{"d"}, Desc: "ver diff", Configurable: true},
 	{Action: ActionGitStage, Scope: ScopeGit, Keys: []string{"s"}, Desc: "preparar cambio", Configurable: true},
@@ -347,8 +347,8 @@ var catalog = []Binding{
 	{Action: ActionGitConfirmNo, Scope: ScopeGitConfirm, Keys: []string{"n", "esc"}, Desc: "cancelar", Configurable: false},
 
 	// docker
-	{Action: ActionDockerUp, Scope: ScopeDocker, Keys: []string{"j", "down"}, Desc: "subir", Configurable: true},
-	{Action: ActionDockerDown, Scope: ScopeDocker, Keys: []string{"k", "up"}, Desc: "bajar", Configurable: true},
+	{Action: ActionDockerUp, Scope: ScopeDocker, Keys: []string{"k", "up"}, Desc: "subir", Configurable: true},
+	{Action: ActionDockerDown, Scope: ScopeDocker, Keys: []string{"j", "down"}, Desc: "bajar", Configurable: true},
 	{Action: ActionDockerPageUp, Scope: ScopeDocker, Keys: []string{"pgup"}, Desc: "página arriba", Configurable: true},
 	{Action: ActionDockerPageDown, Scope: ScopeDocker, Keys: []string{"pgdown"}, Desc: "página abajo", Configurable: true},
 	{Action: ActionDockerHome, Scope: ScopeDocker, Keys: []string{"home"}, Desc: "inicio de la lista", Configurable: true},
@@ -368,8 +368,8 @@ var catalog = []Binding{
 	// docker logs
 	{Action: ActionDockerLogsClose, Scope: ScopeDockerLogs, Keys: []string{"esc"}, Desc: "cerrar logs", Configurable: false},
 	{Action: ActionDockerLogsReload, Scope: ScopeDockerLogs, Keys: []string{"r"}, Desc: "recargar logs", Configurable: false},
-	{Action: ActionDockerLogsUp, Scope: ScopeDockerLogs, Keys: []string{"j", "down"}, Desc: "subir", Configurable: false},
-	{Action: ActionDockerLogsDown, Scope: ScopeDockerLogs, Keys: []string{"k", "up"}, Desc: "bajar", Configurable: false},
+	{Action: ActionDockerLogsUp, Scope: ScopeDockerLogs, Keys: []string{"k", "up"}, Desc: "subir", Configurable: false},
+	{Action: ActionDockerLogsDown, Scope: ScopeDockerLogs, Keys: []string{"j", "down"}, Desc: "bajar", Configurable: false},
 	{Action: ActionDockerLogsPageUp, Scope: ScopeDockerLogs, Keys: []string{"pgup"}, Desc: "página arriba", Configurable: false},
 	{Action: ActionDockerLogsPageDown, Scope: ScopeDockerLogs, Keys: []string{"pgdown"}, Desc: "página abajo", Configurable: false},
 	{Action: ActionDockerLogsHome, Scope: ScopeDockerLogs, Keys: []string{"home"}, Desc: "inicio de los logs", Configurable: false},

@@ -290,6 +290,46 @@ func TestDefaultKeymapIsUsedWithoutOne(t *testing.T) {
 	}
 }
 
+// TestHelpAndStatusbarShowTheEffectiveKeys checks that the help overlay and the statusbar render the
+// keys of the injected keymap, never the built-in ones.
+func TestHelpAndStatusbarShowTheEffectiveKeys(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"help": {"h"}, "quit": {"x"}, "tab_git": {"g"}})
+
+	m := newSized(t, deps, 200, 40)
+	m = update(t, m, typed('h'))
+	if !m.HelpVisible() {
+		t.Fatal("HelpVisible() = false, want the reassigned key to open the help")
+	}
+
+	view := plainCells(m.View().Content)
+	for _, want := range []string{
+		"h  abrir la ayuda",
+		"x / ctrl+c  salir de la aplicación",
+		"g  pestaña de Git",
+		"esc  cerrar la ayuda o reenviarla al panel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() = %q, want %q", view, want)
+		}
+	}
+	if strings.Contains(view, "?  abrir la ayuda") {
+		t.Errorf("View() = %q, want the default help key replaced", view)
+	}
+
+	m = update(t, m, key(tea.KeyEscape))
+	if m.HelpVisible() {
+		t.Fatal("HelpVisible() = true, want esc to close the help")
+	}
+
+	status := plainCells(m.View().Content)
+	for _, want := range []string{"1/g/3 tabs", "tab foco", "h ayuda", "x / ctrl+c salir"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("View() = %q, want %q", status, want)
+		}
+	}
+}
+
 func TestTabsSwitchWithTheOverriddenKey(t *testing.T) {
 	deps := testDeps(t)
 	deps.Keys = withKeys(t, map[string][]string{"tab_git": {"g"}})
@@ -515,8 +555,8 @@ func TestHelpTogglesWithTheQuestionMark(t *testing.T) {
 	}
 
 	view := m.View().Content
-	for _, want := range []string{"atajos", "1 / 2", "tab"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{"tui-editor · atajos", "1  pestaña de archivos", "tab  siguiente panel", "esc  cerrar la ayuda"} {
+		if !strings.Contains(plainCells(view), want) {
 			t.Errorf("View() = %q, want %q", view, want)
 		}
 	}

@@ -43,7 +43,10 @@ type externalDoneMsg struct {
 var errNoEditor = errors.New("editor: servicio de editor no configurado")
 
 // draftHint is the confirmation shown before dropping unsaved changes.
-const draftHint = "¿descartar los cambios sin guardar? (y descarta, n cancela)"
+func (m Model) draftHint() string {
+	return "¿descartar los cambios sin guardar? (" + m.keys.Label(keymap.ActionEditorDiscardYes) +
+		" descarta, " + m.keys.Label(keymap.ActionEditorDiscardNo) + " cancela)"
+}
 
 // The caret reverses its cell; the reset keeps the colour of the token around it.
 const (
@@ -181,7 +184,7 @@ func (m *Model) clearDraftLines() {
 func (m Model) draftBody() string {
 	lines := make([]string, 0, 3)
 	if m.confirmDiscard {
-		lines = append(lines, styles.FailPlain.Render(draftHint))
+		lines = append(lines, styles.FailPlain.Render(m.draftHint()))
 	}
 	if m.saveErr != nil {
 		lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))

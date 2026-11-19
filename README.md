@@ -40,6 +40,9 @@ solo se puebla con `make dev-docker` (ver [Docker y socket](#docker-y-socket)).
   Compose (nombre, imagen, estado, health, puertos), con `a` para ver todos los
   contenedores del daemon. Muestra puntual de `stats`, `logs` paginados sin
   `follow` y acciones `start`/`stop`/`restart` con confirmación.
+- **Temas y atajos configurables:** cuatro temas (Tokyo Night, Catppuccin Mocha,
+  Dracula y Gruvbox Dark) y overrides de teclado mediante un `config.json` en
+  XDG; `--list-themes` y `--list-keys` muestran los catálogos.
 - **Multiplataforma y bajo consumo:** binarios estáticos (`CGO_ENABLED=0`) para
   linux/darwin/windows en amd64 y arm64.
 
@@ -79,7 +82,9 @@ tui-editor/
 │   └── tui/
 │       ├── app/           # modelo raíz, pestañas, layout y ratón
 │       ├── common/        # piezas compartidas (diff)
-│       └── components/    # filetree, editor, gitpanel y dockerpanel
+│       ├── components/    # filetree, editor, gitpanel y dockerpanel
+│       ├── keymap/        # registro de acciones, parser de teclas, overrides y ayuda
+│       └── styles/        # catálogo de temas y tokens visuales
 ├── scripts/               # install.sh (Linux/macOS) e install.ps1 (Windows)
 ├── .air.toml
 ├── .dockerignore
@@ -269,7 +274,98 @@ Si el daemon no está disponible (socket ausente, permiso denegado) el panel
 muestra un mensaje accionable y `r` reintenta sin tumbar la TUI. En `dev` y `app`
 el socket no está montado, así que el panel aparece como “no disponible”.
 
+## Configuración
+
+La configuración vive en un único archivo JSON (tema y atajos) y se resuelve en
+tres niveles —flags, variables de entorno y archivo— con esta correspondencia:
+
+| Dato | Flag | Env | Archivo | Default |
+| :--- | :--- | :--- | :--- | :--- |
+| Ruta del archivo | `--config FILE` | `TUI_EDITOR_CONFIG` | — | `$XDG_CONFIG_HOME/tui-editor/config.json` (`os.UserConfigDir()/tui-editor/config.json`) |
+| Tema | `--theme NAME` | `TUI_EDITOR_THEME` | `theme` | `tokyonight-night` |
+| Atajos | — | — | `keys` | defaults del registro |
+
+La precedencia es **flags > env > archivo > defaults**: el flag gana a la variable
+de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
+default.
+
+- Si el archivo por defecto **no existe, se ignora** sin error: arrancas con los
+  defaults del registro.
+- Si `--config` o `TUI_EDITOR_CONFIG` apuntan a un archivo inexistente, es un
+  **error**: la ruta explícita debe existir.
+- El JSON es **estricto**: campos desconocidos, JSON inválido, acciones
+  desconocidas, teclas inválidas, conflictos dentro de un mismo scope o teclas
+  reservadas producen un error accionable en `stderr` (código 1).
+- No hay recarga en caliente: reinicia la TUI para aplicar los cambios.
+
+Ejemplo de archivo:
+
+```json
+{
+  "theme": "catppuccin-mocha",
+  "keys": {
+    "quit": ["q"],
+    "help": ["?"],
+    "tab_files": ["1"],
+    "tab_git": ["2"],
+    "tab_docker": ["3"],
+    "tree_up": ["up", "k"],
+    "tree_down": ["down", "j"],
+    "git_up": ["k", "up"],
+    "git_down": ["j", "down"],
+    "docker_up": ["k", "up"],
+    "docker_down": ["j", "down"],
+    "git_stage": ["s"],
+    "docker_logs": ["l"]
+  }
+}
+```
+
+Sobre el bloque `keys`:
+
+- Una acción omitida conserva su default; si la incluyes, tu array **sustituye la
+  lista completa** de esa acción (no se fusiona con el default).
+- Cada acción admite una cadena o una lista: `"quit": "q"` equivale a
+  `"quit": ["q"]`.
+- Las acciones modales (confirmaciones, commit, prompt y logs) **no son
+  configurables**.
+- `ctrl+c` siempre sale; `esc` y `enter` están reservados para modales y ayuda y
+  no se pueden asignar en overrides.
+- `--list-keys` imprime todos los IDs, su scope, sus teclas por defecto y si son
+  configurables o fijas.
+- `--list-themes` imprime el catálogo y marca el default.
+
+### Temas
+
+| Nombre | Estilo Chroma | Descripción | Default |
+| :--- | :--- | :--- | :---: |
+| `tokyonight-night` | `tokyonight-night` | Tokyo Night | Sí |
+| `catppuccin-mocha` | `catppuccin-mocha` | Catppuccin Mocha | — |
+| `dracula` | `dracula` | Dracula | — |
+| `gruvbox-dark` | `gruvbox` | Gruvbox Dark | — |
+
+Un `--theme`/`TUI_EDITOR_THEME`/`theme` fuera de este catálogo es un error que
+lista los nombres válidos. El tema colorea los tokens de la interfaz y el
+resaltado de sintaxis del preview (Chroma).
+
+### Ejemplos de uso
+
+```bash
+tui-editor --theme dracula
+TUI_EDITOR_THEME=gruvbox-dark tui-editor
+tui-editor --config ~/.config/tui-editor/config.json
+tui-editor --list-themes
+tui-editor --list-keys
+```
+
 ## Pestañas y atajos
+
+Los atajos de las tablas son los **defaults**: se pueden sobrescribir en
+`config.json` (ver [Configuración](#configuración)) y `--list-keys` muestra el ID
+de cada acción. La ayuda `?` refleja siempre las teclas **efectivas**, es decir,
+las que resultan de aplicar los overrides sobre los defaults. Las teclas modales
+(`enter`, `esc`, `y`, `n`, `ctrl+s`) permanecen **fijas**, igual que `ctrl+c` para
+salir.
 
 | Atajo | Acción |
 | --- | --- |
@@ -462,9 +558,14 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |
 | `--debug-log FILE` | vacío | Archivo de log de depuración |
+| `--config FILE` | `$XDG_CONFIG_HOME/tui-editor/config.json` | Archivo JSON de temas y atajos; si se indica explícitamente debe existir |
+| `--theme NAME` | `tokyonight-night` | Tema de color; `--list-themes` muestra los válidos |
+| `--list-themes` | — | Lista los temas disponibles y sale |
+| `--list-keys` | — | Lista las acciones, su scope, sus teclas por defecto y si son configurables, y sale |
 
 `--help` muestra el uso. Los errores de validación se imprimen en `stderr` y el
-proceso termina con código 1. `--version` no valida el resto de flags.
+proceso termina con código 1. `--version`, `--list-themes` y `--list-keys` no
+validan repositorio, editor ni Docker.
 
 ```bash
 docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version

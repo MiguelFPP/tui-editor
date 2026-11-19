@@ -285,6 +285,65 @@ func TestParseVersionDefaultsOff(t *testing.T) {
 	}
 }
 
+func TestParseListFlagsSkipValidation(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.json")
+
+	cases := []struct {
+		name  string
+		flag  string
+		check func(Config) bool
+	}{
+		{name: "list-themes", flag: "--list-themes", check: func(cfg Config) bool { return cfg.ListThemes }},
+		{name: "list-keys", flag: "--list-keys", check: func(cfg Config) bool { return cfg.ListKeys }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{
+				tc.flag,
+				"--repo", filepath.Join(t.TempDir(), "nope"),
+				"--editor", "   ",
+				"--docker-host", "http://127.0.0.1:2375",
+				"--config", missing,
+				"extra",
+			}
+
+			cfg, err := Parse(args, noEnv)
+			if err != nil {
+				t.Fatalf("Parse() error = %v, want nil", err)
+			}
+			if !tc.check(cfg) {
+				t.Errorf("Parse() = %+v, want %s activo", cfg, tc.flag)
+			}
+			if cfg.ListThemes == cfg.ListKeys {
+				t.Errorf("Parse() = %+v, want exactly one list flag", cfg)
+			}
+			if cfg.ShowVersion || cfg.Repo != "" || cfg.Editor != "" || cfg.DockerHost != "" ||
+				cfg.DebugLog != "" || cfg.ConfigPath != "" || cfg.Theme != "" || cfg.Keys != nil {
+				t.Errorf("Parse() = %+v, want only the list flag", cfg)
+			}
+		})
+	}
+}
+
+func TestParseListFlagsDefaultOff(t *testing.T) {
+	cfg, err := Parse(nil, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.ListThemes || cfg.ListKeys {
+		t.Errorf("Parse() = %+v, want both list flags off", cfg)
+	}
+}
+
+func TestUsageListsCatalogs(t *testing.T) {
+	for _, want := range []string{"--list-themes", "--list-keys"} {
+		if !strings.Contains(Usage, want) {
+			t.Errorf("Usage no menciona %q", want)
+		}
+	}
+}
+
 func TestParseConfigDefaultMissing(t *testing.T) {
 	withDefaultConfigDir(t)
 
