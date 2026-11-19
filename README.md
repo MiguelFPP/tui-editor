@@ -78,6 +78,7 @@ tui-editor/
 │       ├── app/           # modelo raíz, pestañas, layout y ratón
 │       ├── common/        # piezas compartidas (diff)
 │       └── components/    # filetree, editor, gitpanel y dockerpanel
+├── scripts/               # install.sh (Linux/macOS) e install.ps1 (Windows)
 ├── .air.toml
 ├── .dockerignore
 ├── .goreleaser.yaml
@@ -99,25 +100,84 @@ se mantiene fuera del repositorio.
 
 ## Requisitos
 
-- Docker
-- Docker Compose v2 o superior
+Para **usar** el binario no hace falta nada más: es estático (`CGO_ENABLED=0`),
+así que solo necesitas Linux, macOS o Windows en amd64 o arm64.
 
-No hace falta Go ni Node en el host: todo se ejecuta dentro de contenedores.
+- `git` en el `PATH` si vas a usar las pestañas Git (el adaptador usa el binario
+  nativo, no una librería).
+- Un daemon Docker accesible si vas a usar la pestaña Docker; si no está, el
+  panel muestra un estado accionable y la TUI sigue funcionando.
+
+Para **desarrollar** el proyecto sí necesitas Docker y Docker Compose v2 o
+superior: todo se compila y se prueba dentro de contenedores, sin Go en el host.
 
 ## Instalación
 
-### Desde GitHub Releases
+### Instalador (recomendado)
 
-Cada tag `vX.Y.Z` publica archivos `tar.gz` (zip en Windows) para
-linux/darwin/windows × amd64/arm64, más un `checksums.txt`. Descarga el
-correspondiente desde la página de
-[releases](https://github.com/MiguelFPP/tui-editor/releases).
+Linux y macOS:
 
 ```bash
-# Linux amd64: sustituye <version> por la versión publicada, p. ej. 0.3.0
-curl -fL -O https://github.com/MiguelFPP/tui-editor/releases/latest/download/tui-editor_<version>_linux_amd64.tar.gz
-tar -xzf tui-editor_<version>_linux_amd64.tar.gz
+curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.ps1 | iex
+```
+
+El instalador detecta el sistema y la arquitectura, descarga el archivo de la
+última release, **verifica el SHA-256** contra `checksums.txt` y deja el binario
+en:
+
+| Sistema | Destino por defecto |
+| --- | --- |
+| Linux/macOS, como root | `/usr/local/bin` |
+| Linux/macOS, usuario normal | `~/.local/bin` (avisa si falta en el `PATH`) |
+| Windows | `%LOCALAPPDATA%\Programs\tui-editor` (lo añade al `PATH` de usuario) |
+
+Opciones de `install.sh`:
+
+```bash
+# Versión concreta y directorio propio
+curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
+  | sh -s -- --version v0.3.0 --dir "$HOME/bin"
+
+# Sin verificar el checksum (no recomendado)
+curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
+  | sh -s -- --no-verify
+```
+
+Opciones de `install.ps1`: `-Version v0.3.0`, `-Dir C:\Tools\tui-editor`,
+`-NoVerify` y `-NoPath` (no tocar el `PATH` de usuario).
+
+Ningún instalador requiere `sudo` por sí mismo: si escribes en un directorio del
+sistema, ejecútalo con los permisos que ese directorio necesite.
+
+### Descarga manual
+
+Cada tag `vX.Y.Z` publica archivos `tar.gz` (zip en Windows) para
+linux/darwin/windows × amd64/arm64, más un `checksums.txt`, desde la página de
+[releases](https://github.com/MiguelFPP/tui-editor/releases).
+
+El nombre del asset **incluye la versión**, así que sustituye `<version>` por la
+versión publicada (por ejemplo `0.3.0`; el prefijo `v` no forma parte del
+nombre):
+
+```bash
+# Linux amd64
+version=0.3.0
+curl -fL -O "https://github.com/MiguelFPP/tui-editor/releases/download/v${version}/tui-editor_${version}_linux_amd64.tar.gz"
+tar -xzf "tui-editor_${version}_linux_amd64.tar.gz"
 ./tui-editor --version
+```
+
+Para consultar la última versión publicada sin la API de GitHub:
+
+```bash
+curl -fsSL -o /dev/null -w '%{url_effective}\n' \
+  https://github.com/MiguelFPP/tui-editor/releases/latest | sed 's#.*/tag/v##'
 ```
 
 ### Build local (recomendado para desarrollo)
@@ -134,7 +194,38 @@ docker compose run --rm --no-deps -T dev sh -c \
   'go install github.com/goreleaser/goreleaser/v2@v2.20.2 && /go/bin/goreleaser build --snapshot --clean'
 ```
 
+### Desde el código fuente
+
+Si prefieres compilar tú mismo y ya tienes Go 1.27.4 o superior:
+
+```bash
+git clone https://github.com/MiguelFPP/tui-editor.git
+cd tui-editor
+go build -trimpath -o tui-editor ./cmd/tui-editor
+```
+
+Con `go build` sin ldflags el binario funciona pero `--version` informa `dev`.
+Para inyectar la versión igual que GoReleaser:
+
+```bash
+go build -trimpath \
+  -ldflags "-s -w -X main.version=0.3.0 -X main.commit=$(git rev-parse --short HEAD)" \
+  -o tui-editor ./cmd/tui-editor
+```
+
+Requiere `git` en el `PATH` para las pestañas Git, igual que la instalación por
+binario.
+
 ## Quickstart
+
+Con el binario instalado, basta con apuntarlo a un repositorio:
+
+```bash
+tui-editor --repo .        # abre el directorio actual
+tui-editor                 # o usa el directorio actual por defecto
+```
+
+Para desarrollo del proyecto, el flujo equivalente es:
 
 ```bash
 make dev      # TUI con hot reload (requiere TTY)

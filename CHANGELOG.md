@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+One-line installation scripts.
+
+### Added
+
+- `scripts/install.sh` for Linux and macOS: detects the platform, resolves the
+  latest release without the GitHub API, downloads the matching archive, verifies
+  its SHA-256 against `checksums.txt` and installs to `/usr/local/bin` (root) or
+  `~/.local/bin`.
+- `scripts/install.ps1` for Windows: same flow with `amd64`/`arm64` detection,
+  checksum verification, install into `%LOCALAPPDATA%\Programs\tui-editor` and
+  user `PATH` registration.
+
+### Fixed
+
+- The README download snippet pointed at `releases/latest/download/<asset>`,
+  which cannot work because the asset name embeds the version.
+
 ## [0.3.0] - 2026-11-18
 
 Docker panel and release/documentation tooling.
