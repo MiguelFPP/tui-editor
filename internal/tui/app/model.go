@@ -34,6 +34,9 @@ const (
 	treePercent  = 35
 	minEditorBox = 20
 
+	// treeStep is the cells one keyboard resize moves the shared border.
+	treeStep = 2
+
 	toastTTL = 3 * time.Second
 
 	// dirtyDraft is the notice shown when an action would drop an unsaved draft.
@@ -81,6 +84,9 @@ type Deps struct {
 	Editor ports.EditorService
 	Docker ports.DockerService
 	Keys   keymap.Registry
+
+	// SaveLayout persists the tree layout; nil means the layout is not persisted.
+	SaveLayout func(width int, collapsed bool) error
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -102,11 +108,20 @@ type Model struct {
 	width  int
 	height int
 
-	tabRects   [tabCount]image.Rectangle
-	treeRect   image.Rectangle
-	editorRect image.Rectangle
-	gitRect    image.Rectangle
-	dockerRect image.Rectangle
+	tabRects     [tabCount]image.Rectangle
+	treeRect     image.Rectangle
+	editorRect   image.Rectangle
+	gitRect      image.Rectangle
+	dockerRect   image.Rectangle
+	splitterRect image.Rectangle
+	collapseRect image.Rectangle
+
+	// Layout of the Files tab: the explicit tree width, the handle state and the button.
+	treeWidth     int
+	treeCollapsed bool
+	dragging      bool
+	dragDirty     bool
+	saveLayout    func(int, bool) error
 
 	help       bool
 	configOpen bool
@@ -124,6 +139,11 @@ type toastExpiredMsg struct {
 	seq int
 }
 
+// layoutSavedMsg carries the result of persisting the tree layout.
+type layoutSavedMsg struct {
+	err error
+}
+
 // New builds the root model for the given dependencies.
 func New(deps Deps) Model {
 	keys := deps.Keys
@@ -132,20 +152,23 @@ func New(deps Deps) Model {
 	}
 
 	m := Model{
-		cfg:      deps.Config,
-		files:    deps.Files,
-		editors:  deps.Editor,
-		keys:     keys,
-		tree:     filetree.New(deps.Files, "", keys),
-		git:      gitpanel.New(deps.Git, keys),
-		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
-		tab:      FilesTab,
-		focus:    FocusTree,
-		width:    defaultWidth,
-		height:   defaultHeight,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
-		spinning: true,
+		cfg:           deps.Config,
+		files:         deps.Files,
+		editors:       deps.Editor,
+		keys:          keys,
+		tree:          filetree.New(deps.Files, "", keys),
+		git:           gitpanel.New(deps.Git, keys),
+		docker:        dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
+		tab:           FilesTab,
+		width:         defaultWidth,
+		height:        defaultHeight,
+		treeWidth:     deps.Config.TreeWidth,
+		treeCollapsed: deps.Config.TreeCollapsed,
+		saveLayout:    deps.SaveLayout,
+		spinner:       spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
+		spinning:      true,
 	}
+	m.focus = m.filesFocus() // a collapsed tree leaves the editor as the only panel
 	m.resize()
 
 	return m
@@ -173,6 +196,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case tea.MouseClickMsg:
 		cmds = append(cmds, m.handleClick(msg))
+	case tea.MouseMotionMsg:
+		cmds = append(cmds, m.handleMotion(msg))
+	case tea.MouseReleaseMsg:
+		cmds = append(cmds, m.handleRelease(msg))
 	case tea.MouseWheelMsg:
 		cmds = append(cmds, m.handleWheel(msg))
 	case spinner.TickMsg:
@@ -186,6 +213,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toastExpiredMsg:
 		if msg.seq == m.toastSeq {
 			m.toast = ""
+		}
+	case layoutSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.notify(msg.err.Error()))
 		}
 	case filetree.FileChosenMsg:
 		if m.editorDirty() {
@@ -346,6 +377,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.setTab(GitTab), false
 	case keymap.ActionTabDocker:
 		return m.setTab(DockerTab), false
+	case keymap.ActionToggleTree:
+		return m.toggleTree(), false
+	case keymap.ActionTreeShrink:
+		return m.resizeTree(-treeStep), false
+	case keymap.ActionTreeGrow:
+		return m.resizeTree(treeStep), false
 	case keymap.ActionFocusNext, keymap.ActionFocusPrev:
 		// Outside the Files tab the key belongs to the panel, which uses it for its own sections.
 		if m.tab == FilesTab {
@@ -388,14 +425,29 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-// handleClick routes a click to the top tabs first and then to the panel under the cursor.
+// handleClick routes a click to the tabs, the tree button, the splitter or the panel.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	if m.help || m.configOpen {
 		return nil
 	}
 
+	splitter := m.onSplitter(msg.X, msg.Y)
+	if !splitter {
+		m.cancelDrag() // a click away from the handle never keeps a drag alive
+	}
+
 	if tab, ok := m.tabAt(msg.X, msg.Y); ok {
 		return m.setTab(tab) // an active tab is a no-op: it never steals the focus
+	}
+
+	if m.onCollapse(msg.X, msg.Y) {
+		return m.toggleTree() // the button mirrors the toggle key and never moves the selection
+	}
+
+	if splitter {
+		m.dragging, m.dragDirty = true, false
+
+		return nil // resizing never moves the keyboard
 	}
 
 	panel, ok := m.panelAt(msg.X, msg.Y)
@@ -405,6 +457,69 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	m.focus = panel
 
 	return m.dispatchMouse(msg, panel)
+}
+
+// handleMotion resizes the tree while the border is dragged; the release persists it.
+func (m *Model) handleMotion(msg tea.MouseMotionMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	// The handle only exists in the Files tab with the tree visible.
+	if m.tab != FilesTab || m.treeCollapsed {
+		m.cancelDrag()
+
+		return nil
+	}
+
+	width, _ := m.canvas()
+	next := clamp(msg.X+1, minTree, max(width-minEditorBox, minTree))
+	if next == m.treeWidthNow(width) {
+		return nil
+	}
+
+	m.treeWidth = next
+	m.dragDirty = true
+	m.resize()
+
+	return nil
+}
+
+// handleRelease ends the drag and persists the layout once, only when the border moved.
+func (m *Model) handleRelease(tea.MouseReleaseMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	m.dragging = false
+	if !m.dragDirty {
+		return nil
+	}
+
+	m.dragDirty = false
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	width, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
+}
+
+// cancelDrag drops a drag without persisting anything.
+func (m *Model) cancelDrag() {
+	m.dragging, m.dragDirty = false, false
+}
+
+// onSplitter reports whether the point falls on the draggable border of the Files tab.
+func (m Model) onSplitter(x, y int) bool {
+	return m.tab == FilesTab && m.canSplit() && image.Pt(x, y).In(m.splitterRect)
+}
+
+// onCollapse reports whether the point falls on the tree button of the Files tab.
+func (m Model) onCollapse(x, y int) bool {
+	return m.tab == FilesTab && image.Pt(x, y).In(m.collapseRect)
 }
 
 // handleWheel sends the wheel to the panel under the cursor, not to the focused one.
@@ -518,21 +633,99 @@ func (m *Model) setTab(tab Tab) tea.Cmd {
 		m.focus = FocusDocker
 		cmd = m.docker.SetActive(true)
 	default:
-		m.focus = FocusTree
+		m.focus = m.filesFocus()
 	}
+	m.resize() // the tree button of the tab row belongs to the Files tab only
 
 	return cmd
+}
+
+// filesFocus is the panel that owns the keyboard inside the Files tab.
+func (m Model) filesFocus() Focus {
+	if m.treeCollapsed {
+		return FocusEditor
+	}
+
+	return FocusTree
 }
 
 // toggleFocus alternates between the tree and the editor inside the Files tab.
 func (m *Model) toggleFocus() {
 	if !m.hasEditor || m.focus == FocusEditor {
-		m.focus = FocusTree
+		m.focus = m.filesFocus() // a collapsed tree never takes the keyboard
 
 		return
 	}
 
 	m.focus = FocusEditor
+}
+
+// toggleTree hides or shows the tree, leaving the keyboard in the editor either way.
+func (m *Model) toggleTree() tea.Cmd {
+	if m.tab != FilesTab {
+		return nil
+	}
+
+	m.treeCollapsed = !m.treeCollapsed
+	if m.treeCollapsed {
+		m.cancelDrag() // the handle disappears together with the tree
+	}
+	// The tree keeps its own state and never takes the keyboard back on its own.
+	m.focus = FocusEditor
+	m.resize()
+
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	width, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
+}
+
+// resizeTree moves the shared border by delta cells, clamped like the drag, and persists it once.
+func (m *Model) resizeTree(delta int) tea.Cmd {
+	// A hidden tree has no border to move, and the other tabs have no tree at all.
+	if m.tab != FilesTab || m.treeCollapsed {
+		return nil
+	}
+
+	width, _ := m.canvas()
+	current := m.treeWidthNow(width)
+	next := clamp(current+delta, minTree, max(width-minEditorBox, minTree))
+	if next == current {
+		return nil
+	}
+
+	m.treeWidth = next
+	m.resize()
+
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	persisted, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(persisted, collapsed)} }
+}
+
+// canSplit reports whether the Files tab shows a draggable splitter: a tree beside the editor.
+func (m Model) canSplit() bool {
+	width, _ := m.canvas()
+	treeW := m.treeWidthNow(width)
+
+	return m.tab == FilesTab && treeW > 0 && width > treeW
+}
+
+// treeWidthNow returns the outer width of the tree, or zero while it is collapsed.
+func (m Model) treeWidthNow(width int) int {
+	if m.treeCollapsed {
+		return 0
+	}
+
+	return splitWidth(width, m.treeWidth)
 }
 
 // editorDirty reports whether the open file holds a draft that is not on disk yet.

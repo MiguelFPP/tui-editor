@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Resizable and collapsible file tree.
+
+### Added
+
+- The shared border of the `Files` tab is draggable with the mouse: the tree
+  width follows the pointer, clamped so both panels keep a minimum, and the new
+  width is saved on release.
+- `F2` and the `[<]`/`[>]` button of the tab row collapse and expand the tree.
+  Collapsing hands the whole width to the editor and moves the focus there while
+  the tree keeps its cursor, filter and expanded folders.
+- `shift+left` / `shift+right` resize the tree two cells per press.
+- `tree_width` and `tree_collapsed` in the JSON configuration persist the layout.
+  They are written when the layout changes, creating the file when missing and
+  preserving the theme and key overrides of an existing one.
+
+### Changed
+
+- `--print-config` also prints `tree_width` and `tree_collapsed`, and
+  `--init-config` writes both fields in the base file.
+
+### Fixed
+
+- The `config` action test used `F2`, which now belongs to the tree toggle.
+
 ## [0.5.0] - 2026-11-19
 
 Configurable themes and keybindings.

@@ -36,14 +36,17 @@ type Action string
 
 // Actions of the root scope.
 const (
-	ActionQuit      Action = "quit"
-	ActionHelp      Action = "help"
-	ActionConfig    Action = "config"
-	ActionTabFiles  Action = "tab_files"
-	ActionTabGit    Action = "tab_git"
-	ActionTabDocker Action = "tab_docker"
-	ActionFocusNext Action = "focus_next"
-	ActionFocusPrev Action = "focus_prev"
+	ActionQuit       Action = "quit"
+	ActionHelp       Action = "help"
+	ActionConfig     Action = "config"
+	ActionTabFiles   Action = "tab_files"
+	ActionTabGit     Action = "tab_git"
+	ActionTabDocker  Action = "tab_docker"
+	ActionFocusNext  Action = "focus_next"
+	ActionFocusPrev  Action = "focus_prev"
+	ActionToggleTree Action = "toggle_tree"
+	ActionTreeShrink Action = "tree_shrink"
+	ActionTreeGrow   Action = "tree_grow"
 )
 
 // Actions of the file tree scope.
@@ -283,6 +286,9 @@ var catalog = []Binding{
 	{Action: ActionTabDocker, Scope: ScopeRoot, Keys: []string{"3"}, Desc: "pestaña de Docker", Configurable: true},
 	{Action: ActionFocusNext, Scope: ScopeRoot, Keys: []string{"tab"}, Desc: "siguiente panel", Configurable: true},
 	{Action: ActionFocusPrev, Scope: ScopeRoot, Keys: []string{"shift+tab"}, Desc: "panel anterior", Configurable: true},
+	{Action: ActionToggleTree, Scope: ScopeRoot, Keys: []string{"f2"}, Desc: "minimizar o mostrar el árbol", Configurable: true},
+	{Action: ActionTreeShrink, Scope: ScopeRoot, Keys: []string{"shift+left"}, Desc: "reducir el ancho del árbol", Configurable: true},
+	{Action: ActionTreeGrow, Scope: ScopeRoot, Keys: []string{"shift+right"}, Desc: "ampliar el ancho del árbol", Configurable: true},
 
 	// tree
 	{Action: ActionTreeUp, Scope: ScopeTree, Keys: []string{"up", "k"}, Desc: "subir", Configurable: true},

@@ -13,6 +13,7 @@ const (
 	keyShiftTab = "shift+tab"
 	modCtrl     = "ctrl+"
 	modAlt      = "alt+"
+	modShift    = "shift+"
 )
 
 // keyAliases maps the accepted long names to their canonical short form.
@@ -54,6 +55,12 @@ var namedKeys = map[string]struct{}{
 	"f12":       {},
 }
 
+// shiftArrows are the only shift+ combinations accepted besides shift+tab.
+var shiftArrows = map[string]struct{}{
+	modShift + "left":  {},
+	modShift + "right": {},
+}
+
 // CanonicalKey normalizes raw into the canonical form used by the catalog and
 // by the key strings of Bubble Tea. It never fails: unrecognized input falls
 // back to its lower-cased form, so Match simply misses it.
@@ -76,6 +83,11 @@ func CanonicalKey(raw string) string {
 		return modifier + string(unicode.ToLower(r))
 	}
 
+	// Shift arrows normalize explicitly before the generic fallback.
+	if isShiftArrow(trimmed) {
+		return strings.ToLower(trimmed)
+	}
+
 	// A single rune keeps its case: "E" and "e" are different keys.
 	if utf8.RuneCountInString(trimmed) == 1 {
 		return trimmed
@@ -85,15 +97,16 @@ func CanonicalKey(raw string) string {
 }
 
 // ParseKey validates raw and returns its canonical form. It accepts a single
-// printable rune, the named keys, ctrl+/alt+ plus one printable rune and
-// shift+tab. Reserved keys are rejected later, in Apply, not here.
+// printable rune, the named keys, ctrl+/alt+ plus one printable rune, shift+tab
+// and the shift+left / shift+right arrows. Reserved keys are rejected later, in
+// Apply, not here.
 func ParseKey(raw string) (string, error) {
 	canonical := CanonicalKey(raw)
 
 	switch {
 	case canonical == "":
 		return "", fmt.Errorf("keymap: tecla vacía")
-	case isNamedKey(canonical), canonical == keyShiftTab:
+	case isNamedKey(canonical), isShiftArrow(canonical), canonical == keyShiftTab:
 		return canonical, nil
 	}
 
@@ -139,6 +152,13 @@ func splitModifiedRune(raw string) (string, rune, bool) {
 
 func isNamedKey(key string) bool {
 	_, ok := namedKeys[key]
+
+	return ok
+}
+
+// isShiftArrow accepts only shift+left and shift+right, never a generic shift+x.
+func isShiftArrow(key string) bool {
+	_, ok := shiftArrows[strings.ToLower(key)]
 
 	return ok
 }

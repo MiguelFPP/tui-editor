@@ -25,6 +25,9 @@ func TestCanonicalKey(t *testing.T) {
 		{name: "nombrada en mayúsculas", raw: "UP", want: "up"},
 		{name: "tab", raw: "TAB", want: "tab"},
 		{name: "shift tab", raw: "Shift+Tab", want: "shift+tab"},
+		{name: "shift left", raw: "shift+left", want: "shift+left"},
+		{name: "shift left mayúsculas", raw: "Shift+Left", want: "shift+left"},
+		{name: "shift right", raw: "shift+right", want: "shift+right"},
 		{name: "escape", raw: "Escape", want: "esc"},
 		{name: "return", raw: "Return", want: "enter"},
 		{name: "page up", raw: "PageUp", want: "pgup"},
@@ -45,7 +48,7 @@ func TestCanonicalKey(t *testing.T) {
 func TestCanonicalKeyIsIdempotent(t *testing.T) {
 	raws := []string{
 		"", " ", "   ", "e", "E", "up", "UP", "esc", "escape", "return", "ctrl+s", "Ctrl+S",
-		"alt+E", "shift+tab", "Shift+Tab", "ctrl+tab", "foo", "?",
+		"alt+E", "shift+tab", "Shift+Tab", "shift+left", "shift+right", "Shift+Left", "ctrl+tab", "foo", "?",
 	}
 
 	for _, raw := range raws {
@@ -77,6 +80,8 @@ func TestParseKeyAccepts(t *testing.T) {
 		{name: "tab", raw: "tab", want: "tab"},
 		{name: "shift tab", raw: "shift+tab", want: "shift+tab"},
 		{name: "shift tab mayúsculas", raw: "Shift+Tab", want: "shift+tab"},
+		{name: "shift left", raw: "shift+left", want: "shift+left"},
+		{name: "shift right", raw: "Shift+Right", want: "shift+right"},
 		{name: "up", raw: "up", want: "up"},
 		{name: "down", raw: "down", want: "down"},
 		{name: "left", raw: "left", want: "left"},
@@ -112,7 +117,7 @@ func TestParseKeyAccepts(t *testing.T) {
 
 func TestParseKeyRejects(t *testing.T) {
 	raws := []string{
-		"", "   ", "foo", "ctrl+", "ctrl+ab", "shift+x", "ctrl+tab", "ctrl+shift+a",
+		"", "   ", "foo", "ctrl+", "ctrl+ab", "shift+x", "shift+up", "ctrl+tab", "ctrl+shift+a",
 		"meta+x", "f13", "returnx",
 	}
 
@@ -132,6 +137,10 @@ func messageFor(key string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case "shift+tab":
 		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "shift+left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift}
+	case "shift+right":
+		return tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift}
 	case "tab":
 		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "enter":
@@ -160,6 +169,8 @@ func messageFor(key string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyDelete}
 	case "insert":
 		return tea.KeyPressMsg{Code: tea.KeyInsert}
+	case "f2":
+		return tea.KeyPressMsg{Code: tea.KeyF2}
 	}
 
 	if rest, ok := strings.CutPrefix(key, "ctrl+"); ok {

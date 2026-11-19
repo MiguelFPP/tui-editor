@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"image"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/config"
 	"github.com/MiguelFPP/tui-editor/internal/domain"
@@ -664,12 +667,13 @@ func TestConfigOverlayIgnoresMouse(t *testing.T) {
 
 func TestConfigActionCanBeReassigned(t *testing.T) {
 	deps := testDeps(t)
-	deps.Keys = withKeys(t, map[string][]string{"config": {"F2"}})
+	// f2 already belongs to the tree toggle of the default keymap.
+	deps.Keys = withKeys(t, map[string][]string{"config": {"F3"}})
 
 	m := newSized(t, deps, 120, 40)
-	m, _ = press(t, m, key(tea.KeyF2))
+	m, _ = press(t, m, key(tea.KeyF3))
 	if !m.ConfigVisible() {
-		t.Fatal("ConfigVisible() = false, want the reassigned F2 to open the overlay")
+		t.Fatal("ConfigVisible() = false, want the reassigned F3 to open the overlay")
 	}
 
 	// The default key is replaced, not added.
@@ -943,5 +947,270 @@ func TestMouseWheelOnTheEditorKeepsWorkingWithoutCoordinates(t *testing.T) {
 
 	if got := m.Focus(); got != FocusEditor {
 		t.Errorf("Focus() = %v, want the editor", got)
+	}
+}
+
+// sizedDeps returns the standard deps with the persisted tree layout applied.
+func sizedDeps(t *testing.T, cfg config.Config) Deps {
+	t.Helper()
+
+	deps := testDeps(t)
+	deps.Config.TreeWidth, deps.Config.TreeCollapsed = cfg.TreeWidth, cfg.TreeCollapsed
+
+	return deps
+}
+
+// layoutCall is one recorded call to the injected SaveLayout.
+type layoutCall struct {
+	width     int
+	collapsed bool
+}
+
+// layoutRecorder returns a SaveLayout stub and the calls it records.
+func layoutRecorder() (func(int, bool) error, *[]layoutCall) {
+	calls := make([]layoutCall, 0, 4)
+
+	return func(width int, collapsed bool) error {
+		calls = append(calls, layoutCall{width: width, collapsed: collapsed})
+
+		return nil
+	}, &calls
+}
+
+// tabRowText returns the plain text of the rendered row of the top labels.
+func tabRowText(t *testing.T, m Model) string {
+	t.Helper()
+
+	rows := strings.Split(m.View().Content, "\n")
+	if len(rows) <= tabRow {
+		t.Fatalf("rendered %d rows, want the tab row at %d", len(rows), tabRow)
+	}
+
+	return plainCells(rows[tabRow])
+}
+
+func TestNewWiresTheLayoutSaver(t *testing.T) {
+	recorder, calls := layoutRecorder()
+
+	deps := testDeps(t)
+	deps.SaveLayout = recorder
+
+	m := New(deps)
+	if m.saveLayout == nil {
+		t.Fatal("saveLayout = nil, want the injected saver")
+	}
+	if err := m.saveLayout(42, true); err != nil {
+		t.Fatalf("saveLayout(42, true) = %v, want no error", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("saveLayout calls = %d, want 1", len(*calls))
+	}
+	if got := (*calls)[0]; got.width != 42 || !got.collapsed {
+		t.Errorf("call = %+v, want {width:42 collapsed:true}", got)
+	}
+
+	// A test or an embed without a config file passes no saver at all.
+	if plain := New(testDeps(t)); plain.saveLayout != nil {
+		t.Error("saveLayout != nil, want nil without an injected saver")
+	}
+}
+
+func TestLayoutStartsFromTheConfig(t *testing.T) {
+	cases := []struct {
+		name      string
+		width     int
+		treeWidth int
+		want      int
+	}{
+		{name: "explicit", width: 120, treeWidth: 42, want: 42},
+		{name: "explicit ignores the percentage", width: 200, treeWidth: 42, want: 42},
+		{name: "automatic", width: 120, treeWidth: 0, want: 42},
+		{name: "automatic on a wide canvas", width: 200, treeWidth: 0, want: 70},
+		{name: "below the minimum", width: 120, treeWidth: 5, want: minTree},
+		{name: "above the maximum", width: 120, treeWidth: 9999, want: 120 - minEditorBox},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newSized(t, sizedDeps(t, config.Config{TreeWidth: tc.treeWidth}), tc.width, 40)
+
+			if got := m.treeWidthNow(tc.width); got != tc.want {
+				t.Errorf("treeWidthNow(%d) = %d, want %d", tc.width, got, tc.want)
+			}
+			if got := outerRect(m.treeRect).Dx(); got != tc.want {
+				t.Errorf("tree frame = %d cells wide, want %d", got, tc.want)
+			}
+			if got, want := m.editorRect.Min.X, tc.want+borderSide; got != want {
+				t.Errorf("editorRect.Min.X = %d, want %d right of the tree", got, want)
+			}
+		})
+	}
+}
+
+func TestCollapsedTreeHandsTheCanvasToTheEditor(t *testing.T) {
+	m := newSized(t, sizedDeps(t, config.Config{TreeCollapsed: true}), 120, 40)
+
+	if m.treeRect != (image.Rectangle{}) {
+		t.Errorf("treeRect = %v, want it empty while the tree is collapsed", m.treeRect)
+	}
+	if m.splitterRect != (image.Rectangle{}) {
+		t.Errorf("splitterRect = %v, want it empty while the tree is collapsed", m.splitterRect)
+	}
+	if got := m.treeWidthNow(120); got != 0 {
+		t.Errorf("treeWidthNow(120) = %d, want 0", got)
+	}
+	if m.canSplit() {
+		t.Error("canSplit() = true, want false while the tree is collapsed")
+	}
+	if got := outerRect(m.editorRect).Dx(); got != 120 {
+		t.Errorf("editor frame = %d cells wide, want the whole canvas 120", got)
+	}
+	if got := m.Focus(); got != FocusEditor {
+		t.Errorf("Focus() = %v, want the editor with a collapsed tree", got)
+	}
+}
+
+func TestSplitterCoversTheSharedBorder(t *testing.T) {
+	m := newSized(t, sizedDeps(t, config.Config{TreeWidth: 42}), 120, 40)
+	treeW := m.treeWidthNow(120)
+
+	if !m.canSplit() {
+		t.Fatal("canSplit() = false, want a splitter in the Files tab")
+	}
+	if got, want := m.splitterRect.Min.X, treeW-1; got != want {
+		t.Errorf("splitterRect.Min.X = %d, want %d", got, want)
+	}
+	if got, want := m.splitterRect.Max.X, treeW+1; got != want {
+		t.Errorf("splitterRect.Max.X = %d, want %d", got, want)
+	}
+	if got, want := m.splitterRect.Dx(), 2; got != want {
+		t.Errorf("splitterRect = %d cells wide, want %d", got, want)
+	}
+	if got, want := m.splitterRect.Min.Y, headerRows; got != want {
+		t.Errorf("splitterRect.Min.Y = %d, want the first body row %d", got, want)
+	}
+	if got, want := m.splitterRect.Max.Y, headerRows+bodyHeight(40); got != want {
+		t.Errorf("splitterRect.Max.Y = %d, want the end of the body %d", got, want)
+	}
+}
+
+func TestTreeButtonBelongsToTheFilesTab(t *testing.T) {
+	m := newSized(t, testDeps(t), 120, 40)
+
+	if m.collapseRect.Dx() == 0 {
+		t.Fatal("collapseRect is empty in the Files tab, want the tree button")
+	}
+	if got, want := m.collapseRect.Max.X, 120; got != want {
+		t.Errorf("button ends at column %d, want the canvas edge %d", got, want)
+	}
+	if got := m.collapseRect.Min.X; got < m.tabRects[DockerTab].Max.X {
+		t.Errorf("button starts at column %d, want it after the last tab", got)
+	}
+	if got := m.collapseRect.Min.Y; got != tabRow {
+		t.Errorf("button row = %d, want the tab row %d", got, tabRow)
+	}
+	if row := tabRowText(t, m); !strings.HasSuffix(row, "[<]") {
+		t.Errorf("tab row = %q, want the button of an expanded tree", row)
+	}
+
+	// The other tabs have no tree to resize.
+	for _, tab := range []Tab{GitTab, DockerTab} {
+		other, _ := press(t, newSized(t, testDeps(t), 120, 40), tabKey(tab))
+		if other.collapseRect != (image.Rectangle{}) {
+			t.Errorf("collapseRect with %v = %v, want it empty", tab, other.collapseRect)
+		}
+	}
+}
+
+func TestTreeButtonFollowsTheCollapsedState(t *testing.T) {
+	collapsed := newSized(t, sizedDeps(t, config.Config{TreeCollapsed: true}), 120, 40)
+	if row := tabRowText(t, collapsed); !strings.HasSuffix(row, "[>]") {
+		t.Errorf("tab row = %q, want the button of a hidden tree", row)
+	}
+
+	if got := collapsed.collapseRect.Dx(); got == 0 {
+		t.Error("collapseRect is empty while collapsed, want the button to bring the tree back")
+	}
+}
+
+func TestTreeButtonOnTheMinimumCanvas(t *testing.T) {
+	m := newSized(t, testDeps(t), minWidth, minHeight)
+
+	// A narrow canvas may drop the button, but the row keeps its exact width either way.
+	if got := lipgloss.Width(tabRowText(t, m)); got != minWidth {
+		t.Errorf("tab row = %d cells, want %d", got, minWidth)
+	}
+	if m.collapseRect.Dx() > 0 && m.collapseRect.Min.X < m.tabRects[DockerTab].Max.X {
+		t.Errorf("collapseRect = %v, want it right of the last tab", m.collapseRect)
+	}
+
+	// The button never overlaps the labels.
+	if rect := m.collapseBounds(m.tabLabelsWidth()); rect != (image.Rectangle{}) {
+		t.Errorf("collapseBounds(%d) = %v, want it empty without room", m.tabLabelsWidth(), rect)
+	}
+}
+
+func TestCollapsedRenderFillsTheCanvas(t *testing.T) {
+	for _, size := range canvasSizes {
+		t.Run(size.name, func(t *testing.T) {
+			m := newSized(t, sizedDeps(t, config.Config{TreeCollapsed: true}), size.width, size.height)
+			content := m.View().Content
+
+			rows := strings.Split(content, "\n")
+			if len(rows) != size.height {
+				t.Fatalf("rendered %d rows, want %d", len(rows), size.height)
+			}
+			for i, row := range rows {
+				width := lipgloss.Width(row)
+				if width > size.width {
+					t.Errorf("row %d = %d cells, want at most %d", i, width, size.width)
+				}
+				if i >= headerRows && width != size.width {
+					t.Errorf("row %d = %d cells, want the full width %d", i, width, size.width)
+				}
+			}
+
+			// The editor is the only box: it covers the body from end to end.
+			body := bodyHeight(size.height)
+			outer := outerRect(m.editorRect)
+			if outer.Min.X != 0 || outer.Max.X != size.width {
+				t.Errorf("editor frame spans columns %d..%d, want 0..%d", outer.Min.X, outer.Max.X, size.width)
+			}
+			if outer.Min.Y != headerRows || outer.Max.Y != headerRows+body {
+				t.Errorf("editor frame spans rows %d..%d, want the body %d..%d", outer.Min.Y, outer.Max.Y, headerRows, headerRows+body)
+			}
+			if inner := m.treeRect; inner.Dx() != 0 || inner.Dy() != 0 {
+				t.Errorf("tree inner area = %v, want it empty while collapsed", inner)
+			}
+
+			bottom := headerRows + body - 1
+			top := rowCells(t, content, headerRows)
+			assertGlyph(t, top, 0, '╭')
+			assertGlyph(t, top, size.width-1, '╮')
+			assertGlyph(t, rowCells(t, content, bottom), 0, '╰')
+			assertGlyph(t, rowCells(t, content, bottom), size.width-1, '╯')
+		})
+	}
+}
+
+func TestLayoutSaveErrorShowsTheToast(t *testing.T) {
+	m := newSized(t, testDeps(t), 200, 40)
+
+	const detail = "no se pudo guardar el layout"
+	m = update(t, m, layoutSavedMsg{err: errors.New(detail)})
+	if view := m.View().Content; !strings.Contains(view, toastPrefix+detail) {
+		t.Fatalf("View() = %q, want the %q toast", view, toastPrefix+detail)
+	}
+
+	// The toast expires with the timer of its own sequence.
+	m = update(t, m, toastExpiredMsg{seq: m.toastSeq})
+	if strings.Contains(m.View().Content, toastPrefix) {
+		t.Error("the toast survived its timer")
+	}
+
+	// A successful save is silent.
+	quiet := update(t, newSized(t, testDeps(t), 200, 40), layoutSavedMsg{})
+	if strings.Contains(quiet.View().Content, toastPrefix) {
+		t.Errorf("View() = %q, want no toast after a successful save", quiet.View().Content)
 	}
 }

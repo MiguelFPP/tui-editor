@@ -131,6 +131,12 @@ func run() error {
 	}
 
 	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc, Keys: keys}
+	if cfg.SavePath != "" {
+		// Without a resolved config path there is nowhere to persist the layout.
+		deps.SaveLayout = func(width int, collapsed bool) error {
+			return config.SaveLayout(cfg.SavePath, width, collapsed)
+		}
+	}
 
 	program := tea.NewProgram(app.New(deps))
 	if _, err := program.Run(); err != nil {
@@ -211,10 +217,18 @@ func printConfig(w io.Writer, cfg config.Config) error {
 	}
 
 	out := struct {
-		ConfigPath string              `json:"config_path"`
-		Theme      string              `json:"theme"`
-		Keys       map[string][]string `json:"keys"`
-	}{ConfigPath: cfg.ConfigPath, Theme: name, Keys: keys}
+		ConfigPath    string              `json:"config_path"`
+		Theme         string              `json:"theme"`
+		TreeWidth     int                 `json:"tree_width"`
+		TreeCollapsed bool                `json:"tree_collapsed"`
+		Keys          map[string][]string `json:"keys"`
+	}{
+		ConfigPath:    cfg.ConfigPath,
+		Theme:         name,
+		TreeWidth:     cfg.TreeWidth,
+		TreeCollapsed: cfg.TreeCollapsed,
+		Keys:          keys,
+	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
