@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-19
+
+Installer update fix.
+
+### Fixed
+
+- The installers now replace the binary through a staged file and an atomic
+  rename. Updating while `tui-editor` was running previously failed with
+  `ETXTBSY` ("text file busy") and a confusing error after the download had
+  already succeeded; the running process now keeps working and the next launch
+  uses the new version. Windows uses the same pattern because it refuses to
+  overwrite a running `exe`. An interrupted install no longer leaves a
+  half-written executable behind.
+
 ## [0.3.1] - 2026-11-19
 
 One-line installation for every supported platform.
@@ -82,6 +96,7 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
+[0.3.2]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/MiguelFPP/tui-editor/commit/954fcf4
 [0.2.0]: https://github.com/MiguelFPP/tui-editor/commit/cb7629a

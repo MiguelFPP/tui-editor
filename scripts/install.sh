@@ -200,8 +200,20 @@ tar -xzf "$tmpdir/$name.tar.gz" -C "$tmpdir" "$BIN" ||
 	die "no se pudo extraer $BIN del archivo"
 
 mkdir -p "$install_dir" || die "no se pudo crear ${install_dir}"
-cp "$tmpdir/$BIN" "$install_dir/$BIN" || die "no se pudo escribir en ${install_dir}"
-chmod 0755 "$install_dir/$BIN"
+
+# Write next to the target and rename: the rename replaces the inode, so an
+# update also works while the current binary is running, and an interrupted
+# install never leaves a half-written executable behind.
+staged="$install_dir/.${BIN}.new.$$"
+cp "$tmpdir/$BIN" "$staged" || {
+	rm -f "$staged"
+	die "no se pudo escribir en ${install_dir}"
+}
+chmod 0755 "$staged"
+mv -f "$staged" "$install_dir/$BIN" || {
+	rm -f "$staged"
+	die "no se pudo reemplazar ${install_dir}/${BIN}"
+}
 
 say "✓ instalado ${BIN} ${version} en ${install_dir}/${BIN}"
 

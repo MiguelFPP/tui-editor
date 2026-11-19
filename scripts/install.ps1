@@ -171,7 +171,18 @@ try {
 
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         $destination = Join-Path $target "$Binary.exe"
-        Copy-Item -Path $exe.FullName -Destination $destination -Force
+
+        # Copy next to the target and move it into place: Windows refuses to
+        # overwrite a running executable, and a failed move leaves the previous
+        # working binary untouched.
+        $staged = Join-Path $target ".$Binary.new.$PID.exe"
+        try {
+            Copy-Item -Path $exe.FullName -Destination $staged -Force
+            Move-Item -Path $staged -Destination $destination -Force
+        }
+        finally {
+            Remove-Item -Path $staged -Force -ErrorAction SilentlyContinue
+        }
 
         Write-Host "✓ instalado $Binary $resolved en $destination" -ForegroundColor Green
 
