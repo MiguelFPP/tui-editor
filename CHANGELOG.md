@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-19
+
+Configurable themes and keybindings.
+
+### Added
+
+- Theme catalog with Tokyo Night (default), Catppuccin Mocha, Dracula and
+  Gruvbox Dark. `--theme`, `TUI_EDITOR_THEME` and `--list-themes` select the
+  palette; the preview highlighting follows the same Chroma style.
+- Optional JSON configuration at `os.UserConfigDir()/tui-editor/config.json`,
+  overridable with `--config` and `TUI_EDITOR_CONFIG`. It is validated strictly
+  and resolved as `flags > env > file > defaults`.
+- Configurable keybindings for the root, file tree, editor, Git and Docker
+  scopes. `--list-keys` prints every action, its scope, its defaults and
+  whether it can be overridden.
+- Help overlay, status bar and panel footers render the effective keys.
+- `config.example.json` template with an example theme and key overrides; it is
+  never loaded automatically.
+- `--init-config` writes a minimal base file (`theme: tokyonight-night`,
+  `keys: {}`) to the resolved path and exits; `--force` allows overwriting an
+  existing file.
+- `--print-config` prints the resolved configuration as JSON (`config_path`,
+  `theme`, `keys`) and exits without starting the TUI.
+- A global `config` action (default `,`) that opens a read-only overlay with the
+  loaded file, the active theme, the key overrides and a restart notice.
+
+### Changed
+
+- `internal/tui/styles` is now a theme catalog; `styles.Apply` rebuilds every
+  token and the Chroma style used by the preview.
+- Key handling is centralized in `internal/tui/keymap`; components receive the
+  registry through `Deps`.
+- Modal actions and `ctrl+c` remain fixed to avoid locking the user out.
+- The help overlay and the status bar list the new `config` action generated from
+  the registry.
+
+### Fixed
+
+- `git_up`/`git_down`, `docker_up`/`docker_down` and the Docker logs actions now
+  match their names: `j`/`down` moves down and `k`/`up` moves up.
+
 ## [0.4.0] - 2026-11-19
 
 UI improvements: clickable tabs, syntax highlighting while editing, panel
@@ -130,7 +171,8 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
-[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.1...v0.4.0
 [0.3.2]: https://github.com/MiguelFPP/tui-editor/commit/a9896df
 [0.3.1]: https://github.com/MiguelFPP/tui-editor/compare/v0.3.0...v0.3.1

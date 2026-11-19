@@ -11,14 +11,12 @@ import (
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
-// Fixed style and formatter: the terminal16m formatter derives every escape from
-// the style itself, so the output never depends on the terminal colour profile.
-const (
-	highlightStyle  = "tokyonight-night"
-	highlightFormat = "terminal16m"
-)
+// Fixed formatter: the terminal16m formatter derives every escape from the style
+// itself, so the output never depends on the terminal colour profile.
+const highlightFormat = "terminal16m"
 
 // Highlight colours source by the lexer of path, or by its content, and returns
 // source unchanged when no lexer applies.
@@ -63,7 +61,7 @@ func colourise(path domain.RelPath, source string) (string, bool) {
 		return "", false
 	}
 
-	style := chromastyles.Get(highlightStyle)
+	style := chromastyles.Get(styles.CurrentTheme().ChromaStyle)
 	if style == nil {
 		return "", false
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/editor"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -71,13 +72,15 @@ const (
 	FocusDocker
 )
 
-// Deps are the collaborators injected by the composition root.
+// Deps are the collaborators injected by the composition root. Keys carries the
+// user keymap; an empty registry falls back to the built-in defaults.
 type Deps struct {
 	Config config.Config
 	Files  ports.FileService
 	Git    ports.GitService
 	Editor ports.EditorService
 	Docker ports.DockerService
+	Keys   keymap.Registry
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -85,6 +88,7 @@ type Model struct {
 	cfg     config.Config
 	files   ports.FileService
 	editors ports.EditorService
+	keys    keymap.Registry
 
 	tree      filetree.Model
 	editor    editor.Model
@@ -104,7 +108,8 @@ type Model struct {
 	gitRect    image.Rectangle
 	dockerRect image.Rectangle
 
-	help bool
+	help       bool
+	configOpen bool
 
 	spinner  spinner.Model
 	spinning bool
@@ -121,13 +126,19 @@ type toastExpiredMsg struct {
 
 // New builds the root model for the given dependencies.
 func New(deps Deps) Model {
+	keys := deps.Keys
+	if len(keys.All()) == 0 {
+		keys = keymap.Default()
+	}
+
 	m := Model{
 		cfg:      deps.Config,
 		files:    deps.Files,
 		editors:  deps.Editor,
-		tree:     filetree.New(deps.Files, ""),
-		git:      gitpanel.New(deps.Git),
-		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo),
+		keys:     keys,
+		tree:     filetree.New(deps.Files, "", keys),
+		git:      gitpanel.New(deps.Git, keys),
+		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
 		tab:      FilesTab,
 		focus:    FocusTree,
 		width:    defaultWidth,
@@ -218,6 +229,11 @@ func (m Model) HelpVisible() bool {
 	return m.help
 }
 
+// ConfigVisible reports whether the read-only configuration overlay is open.
+func (m Model) ConfigVisible() bool {
+	return m.configOpen
+}
+
 // fanOut delivers an async message to every child; each one ignores what it does not own.
 func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, 4)
@@ -242,7 +258,7 @@ func (m *Model) fanOut(msg tea.Msg) tea.Cmd {
 
 // openFile replaces the preview with path, focuses it and loads it.
 func (m *Model) openFile(path domain.RelPath) tea.Cmd {
-	m.editor = editor.New(m.files, m.editors, path)
+	m.editor = editor.New(m.files, m.editors, path, m.keys)
 	m.hasEditor = true
 	m.tab = FilesTab
 	m.focus = FocusEditor
@@ -255,12 +271,27 @@ func (m *Model) openFile(path domain.RelPath) tea.Cmd {
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 
+	// The help overlay only answers to quit, to its own toggle and to esc.
 	if m.help {
-		switch key {
-		case "q", "ctrl+c":
+		action, ok := m.keys.Match(keymap.ScopeRoot, key)
+		switch {
+		case ok && action == keymap.ActionQuit:
 			return m.quit()
-		case "?", "esc":
+		case ok && action == keymap.ActionHelp, key == "esc":
 			m.help = false
+		}
+
+		return nil, false
+	}
+
+	// The configuration overlay only answers to quit, to its own toggle and to esc.
+	if m.configOpen {
+		action, ok := m.keys.Match(keymap.ScopeRoot, key)
+		switch {
+		case ok && action == keymap.ActionQuit:
+			return m.quit()
+		case ok && action == keymap.ActionConfig, key == "esc":
+			m.configOpen = false
 		}
 
 		return nil, false
@@ -293,26 +324,30 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.forwardKey(msg), false
 	}
 
-	switch key {
-	case "q", "ctrl+c":
+	action, ok := m.keys.Match(keymap.ScopeRoot, key)
+	if !ok {
+		return m.forwardKey(msg), false
+	}
+
+	switch action {
+	case keymap.ActionQuit:
 		return m.quit()
-	case "?":
+	case keymap.ActionHelp:
 		m.help = true
 
 		return nil, false
-	case "1":
-		return m.setTab(FilesTab), false
-	case "2":
-		return m.setTab(GitTab), false
-	case "3":
-		return m.setTab(DockerTab), false
-	case "tab":
-		if m.tab == FilesTab {
-			m.toggleFocus()
+	case keymap.ActionConfig:
+		m.configOpen = true
 
-			return nil, false
-		}
-	case "shift+tab":
+		return nil, false
+	case keymap.ActionTabFiles:
+		return m.setTab(FilesTab), false
+	case keymap.ActionTabGit:
+		return m.setTab(GitTab), false
+	case keymap.ActionTabDocker:
+		return m.setTab(DockerTab), false
+	case keymap.ActionFocusNext, keymap.ActionFocusPrev:
+		// Outside the Files tab the key belongs to the panel, which uses it for its own sections.
 		if m.tab == FilesTab {
 			m.toggleFocus()
 
@@ -355,7 +390,7 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // handleClick routes a click to the top tabs first and then to the panel under the cursor.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
-	if m.help {
+	if m.help || m.configOpen {
 		return nil
 	}
 
@@ -374,7 +409,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 
 // handleWheel sends the wheel to the panel under the cursor, not to the focused one.
 func (m *Model) handleWheel(msg tea.MouseWheelMsg) tea.Cmd {
-	if m.help {
+	if m.help || m.configOpen {
 		return nil
 	}
 

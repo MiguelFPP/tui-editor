@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -42,7 +43,10 @@ type externalDoneMsg struct {
 var errNoEditor = errors.New("editor: servicio de editor no configurado")
 
 // draftHint is the confirmation shown before dropping unsaved changes.
-const draftHint = "¿descartar los cambios sin guardar? (y descarta, n cancela)"
+func (m Model) draftHint() string {
+	return "¿descartar los cambios sin guardar? (" + m.keys.Label(keymap.ActionEditorDiscardYes) +
+		" descarta, " + m.keys.Label(keymap.ActionEditorDiscardNo) + " cancela)"
+}
 
 // The caret reverses its cell; the reset keeps the colour of the token around it.
 const (
@@ -59,32 +63,36 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.handleDraftKey(msg)
 	}
 
-	switch msg.String() {
-	case "e":
-		return m, m.startEditing()
-	case "E", "ctrl+e":
-		return m, m.startExternal()
-	default:
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-
-		return m, cmd
+	if action, ok := m.keys.Match(keymap.ScopeEditor, msg.String()); ok {
+		switch action {
+		case keymap.ActionEditorEdit:
+			return m, m.startEditing()
+		case keymap.ActionEditorExternal:
+			return m, m.startExternal()
+		}
 	}
+
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+
+	return m, cmd
 }
 
-// handleDraftKey edits the draft, saves it with ctrl+s and leaves it with esc.
+// handleDraftKey edits the draft, saves it with the save shortcut and leaves it with cancel.
 func (m Model) handleDraftKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		if m.dirty {
-			m.confirmDiscard = true
+	if action, ok := m.keys.Match(keymap.ScopeEditorDraft, msg.String()); ok {
+		switch action {
+		case keymap.ActionEditorCancel:
+			if m.dirty {
+				m.confirmDiscard = true
 
-			return m, nil
+				return m, nil
+			}
+
+			return m.stopEditing(), nil
+		case keymap.ActionEditorSave:
+			return m, m.save()
 		}
-
-		return m.stopEditing(), nil
-	case "ctrl+s":
-		return m, m.save()
 	}
 
 	area, cmd := m.area.Update(msg)
@@ -96,12 +104,17 @@ func (m Model) handleDraftKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleDiscardKey answers the confirmation: y drops the draft, n and esc keep it.
+// handleDiscardKey answers the confirmation: yes drops the draft, no keeps it.
 func (m Model) handleDiscardKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "y":
+	action, ok := m.keys.Match(keymap.ScopeEditorDiscard, msg.String())
+	if !ok {
+		return m, nil
+	}
+
+	switch action {
+	case keymap.ActionEditorDiscardYes:
 		return m.discardDraft(), nil
-	case "n", "esc":
+	case keymap.ActionEditorDiscardNo:
 		m.confirmDiscard = false
 	}
 
@@ -171,7 +184,7 @@ func (m *Model) clearDraftLines() {
 func (m Model) draftBody() string {
 	lines := make([]string, 0, 3)
 	if m.confirmDiscard {
-		lines = append(lines, styles.FailPlain.Render(draftHint))
+		lines = append(lines, styles.FailPlain.Render(m.draftHint()))
 	}
 	if m.saveErr != nil {
 		lines = append(lines, styles.FailPlain.Render("error: "+describeError(m.saveErr)))

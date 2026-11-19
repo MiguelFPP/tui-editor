@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -13,6 +14,9 @@ const tabSeparator = " │ "
 
 // titleSeparator joins the fields of the header row.
 const titleSeparator = " · "
+
+// helpColumn is the cell where the description of a documented shortcut starts.
+const helpColumn = 20
 
 // View composes the header, the section tabs and the body of the active section.
 func (m Model) View() string {
@@ -50,7 +54,7 @@ func (m Model) titleText() string {
 
 	title := strings.Join(append(parts, m.identityLabels()...), titleSeparator)
 
-	return title + conflictLabel(len(m.status.Conflicts()))
+	return title + m.conflictLabel(len(m.status.Conflicts()))
 }
 
 // identityLabels names the branch, its upstream and how far it is from it.
@@ -112,12 +116,14 @@ func conflictCount(count int) string {
 }
 
 // conflictLabel is the banner that documents the keys of a conflicted working tree.
-func conflictLabel(count int) string {
+func (m Model) conflictLabel(count int) string {
 	if count == 0 {
 		return ""
 	}
 
-	return titleSeparator + conflictCount(count) + titleSeparator + "o/t/A"
+	return titleSeparator + conflictCount(count) + titleSeparator +
+		m.keys.Label(keymap.ActionGitResolve) + "/" + m.keys.Label(keymap.ActionGitResolveTheirs) + "/" +
+		m.keys.Label(keymap.ActionGitAbortMerge)
 }
 
 func changeLabel(count int) string {
@@ -229,30 +235,61 @@ func (m Model) footerText() string {
 		parts = append(parts, m.notice)
 	}
 
-	parts = append(parts, "tab: sección", "j/k: mover")
+	parts = append(parts,
+		m.keys.Label(keymap.ActionGitSectionNext)+": sección",
+		m.keys.Label(keymap.ActionGitUp)+"/"+m.keys.Label(keymap.ActionGitDown)+": mover",
+	)
 
 	switch m.section {
 	case Changes:
-		parts = append(parts, "enter: diff del archivo", "s: preparar", "u: quitar", "c: commit", "z: stash")
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitActivate)+": diff del archivo",
+			m.keys.Label(keymap.ActionGitStage)+": preparar",
+			m.keys.Label(keymap.ActionGitUnstage)+": quitar",
+			m.keys.Label(keymap.ActionGitCommit)+": commit",
+			m.keys.Label(keymap.ActionGitStash)+": stash",
+		)
 		if len(m.status.Conflicts()) > 0 {
-			parts = append(parts, "o/t: resolver", "A: abortar merge")
+			parts = append(parts,
+				m.keys.Label(keymap.ActionGitResolve)+"/"+m.keys.Label(keymap.ActionGitResolveTheirs)+": resolver",
+				m.keys.Label(keymap.ActionGitAbortMerge)+": abortar merge",
+			)
 		}
 	case Diff:
-		parts = append(parts, "[ ]: hunk", "espacio: marcar", "d: "+m.modeLabel())
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitHunkPrev)+"/"+m.keys.Label(keymap.ActionGitHunkNext)+": hunk",
+			m.keys.Label(keymap.ActionGitHunkToggle)+": marcar",
+			m.keys.Label(keymap.ActionGitDiff)+": "+m.modeLabel(),
+		)
 
 		switch {
 		case m.staged:
-			parts = append(parts, "u: quitar hunks")
+			parts = append(parts, m.keys.Label(keymap.ActionGitUnstage)+": quitar hunks")
 		case m.loaded:
-			parts = append(parts, "s: preparar hunks")
+			parts = append(parts, m.keys.Label(keymap.ActionGitStage)+": preparar hunks")
 		}
 	case Branches:
-		parts = append(parts, "enter: checkout", "n: nueva rama", "x: borrar", "m: merge")
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitActivate)+": checkout",
+			m.keys.Label(keymap.ActionGitNewBranch)+": nueva rama",
+			m.keys.Label(keymap.ActionGitDeleteBranch)+": borrar",
+			m.keys.Label(keymap.ActionGitMerge)+": merge",
+		)
 	case Stash:
-		parts = append(parts, "enter: aplicar", "z: pop", "x: descartar")
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitActivate)+": aplicar",
+			m.keys.Label(keymap.ActionGitStash)+": pop",
+			m.keys.Label(keymap.ActionGitDeleteBranch)+": descartar",
+		)
 	}
 
-	parts = append(parts, "f: fetch", "p: pull", "P: push", "r: refrescar", "?: ayuda")
+	parts = append(parts,
+		m.keys.Label(keymap.ActionGitFetch)+": fetch",
+		m.keys.Label(keymap.ActionGitPull)+": pull",
+		m.keys.Label(keymap.ActionGitPush)+": push",
+		m.keys.Label(keymap.ActionGitRefresh)+": refrescar",
+		m.keys.Label(keymap.ActionGitHelp)+": ayuda",
+	)
 
 	switch {
 	case m.section == Diff && m.diff.Truncated:
@@ -282,50 +319,64 @@ func (m Model) helpLines() []string {
 		"ayuda · panel de git",
 		"",
 		" general",
-		"  tab / shift+tab   cambiar de sección (también con clic en la pestaña)",
-		"  j / k, ↑ / ↓      mover el cursor; la rueda desplaza la lista",
-		"  r                 refrescar estado, ramas, stash e historial",
-		"  f / p / P         fetch, pull y push",
-		"  esc               cerrar la ayuda o volver a Cambios",
-		"  ?                 mostrar u ocultar esta ayuda",
+		helpRow(m.keys.Label(keymap.ActionGitSectionNext)+" / "+m.keys.Label(keymap.ActionGitSectionPrev),
+			"cambiar de sección (también con clic en la pestaña)"),
+		helpRow(m.keys.Label(keymap.ActionGitUp)+", "+m.keys.Label(keymap.ActionGitDown),
+			"mover el cursor; la rueda desplaza la lista"),
+		helpRow(m.keys.Label(keymap.ActionGitRefresh),
+			"refrescar estado, ramas, stash e historial"),
+		helpRow(m.keys.Label(keymap.ActionGitFetch)+" / "+m.keys.Label(keymap.ActionGitPull)+" / "+m.keys.Label(keymap.ActionGitPush),
+			"fetch, pull y push"),
+		helpRow(m.keys.Label(keymap.ActionGitBack),
+			"cerrar la ayuda o volver a Cambios"),
+		helpRow(m.keys.Label(keymap.ActionGitHelp),
+			"mostrar u ocultar esta ayuda"),
 		"",
 	}
 	lines = append(lines, m.helpSection(Changes,
-		"  enter             cargar el diff del archivo",
-		"  s / u             preparar el archivo o quitar el archivo seleccionado",
-		"  c                 abrir el editor del mensaje del commit",
-		"  z                 guardar los cambios en el stash",
-		"  o / t             resolver el conflicto con ours o con theirs",
-		"  A                 abortar el merge en curso",
+		helpRow(m.keys.Label(keymap.ActionGitActivate), "cargar el diff del archivo"),
+		helpRow(m.keys.Label(keymap.ActionGitStage)+" / "+m.keys.Label(keymap.ActionGitUnstage), "preparar el archivo o quitar el archivo seleccionado"),
+		helpRow(m.keys.Label(keymap.ActionGitCommit), "abrir el editor del mensaje del commit"),
+		helpRow(m.keys.Label(keymap.ActionGitStash), "guardar los cambios en el stash"),
+		helpRow(m.keys.Label(keymap.ActionGitResolve)+" / "+m.keys.Label(keymap.ActionGitResolveTheirs), "resolver el conflicto con ours o con theirs"),
+		helpRow(m.keys.Label(keymap.ActionGitAbortMerge), "abortar el merge en curso"),
 	)...)
 	lines = append(lines, m.helpSection(Diff,
-		"  d                 alternar entre worktree y staged",
-		"  [ / ]             mover el cursor entre hunks",
-		"  espacio           marcar o desmarcar el hunk",
-		"  s / u             preparar o quitar los hunks marcados",
+		helpRow(m.keys.Label(keymap.ActionGitDiff), "alternar entre worktree y staged"),
+		helpRow(m.keys.Label(keymap.ActionGitHunkPrev)+" / "+m.keys.Label(keymap.ActionGitHunkNext), "mover el cursor entre hunks"),
+		helpRow(m.keys.Label(keymap.ActionGitHunkToggle), "marcar o desmarcar el hunk"),
+		helpRow(m.keys.Label(keymap.ActionGitStage)+" / "+m.keys.Label(keymap.ActionGitUnstage), "preparar o quitar los hunks marcados"),
 	)...)
 	lines = append(lines, m.helpSection(Branches,
-		"  enter             checkout de la rama seleccionada",
-		"  n                 crear una rama: nombre y punto de partida opcional",
-		"  x                 borrar la rama seleccionada",
-		"  m                 fusionar la rama seleccionada en la actual",
+		helpRow(m.keys.Label(keymap.ActionGitActivate), "checkout de la rama seleccionada"),
+		helpRow(m.keys.Label(keymap.ActionGitNewBranch), "crear una rama: nombre y punto de partida opcional"),
+		helpRow(m.keys.Label(keymap.ActionGitDeleteBranch), "borrar la rama seleccionada"),
+		helpRow(m.keys.Label(keymap.ActionGitMerge), "fusionar la rama seleccionada en la actual"),
 	)...)
 	lines = append(lines, m.helpSection(Stash,
-		"  enter             aplicar la entrada seleccionada",
-		"  z                 pop de la entrada seleccionada",
-		"  x                 descartar la entrada seleccionada",
+		helpRow(m.keys.Label(keymap.ActionGitActivate), "aplicar la entrada seleccionada"),
+		helpRow(m.keys.Label(keymap.ActionGitStash), "pop de la entrada seleccionada"),
+		helpRow(m.keys.Label(keymap.ActionGitDeleteBranch), "descartar la entrada seleccionada"),
 	)...)
 	lines = append(lines, m.helpSection(History,
-		"  j / k, ↑ / ↓      recorrer los commits (solo lectura)",
+		helpRow(m.keys.Label(keymap.ActionGitUp)+", "+m.keys.Label(keymap.ActionGitDown), "recorrer los commits (solo lectura)"),
 	)...)
 
 	return append(lines,
 		"",
 		" modales",
-		"  commit: ctrl+s confirma, esc cancela, enter añade una línea",
-		"  prompt y confirmación: enter confirma, esc cancela",
-		"  confirmar un borrado: y o enter confirma, n o esc cancela",
+		"  commit: "+m.keys.Label(keymap.ActionGitCommitSave)+" confirma, "+
+			m.keys.Label(keymap.ActionGitCommitCancel)+" cancela, enter añade una línea",
+		"  prompt y confirmación: "+m.keys.Label(keymap.ActionGitPromptConfirm)+" confirma, "+
+			m.keys.Label(keymap.ActionGitPromptCancel)+" cancela",
+		"  confirmar un borrado: "+m.keys.Label(keymap.ActionGitConfirmYes)+" confirma, "+
+			m.keys.Label(keymap.ActionGitConfirmNo)+" cancela",
 	)
+}
+
+// helpRow renders one documented shortcut: the keys of its actions, aligned, and its description.
+func helpRow(keys, desc string) string {
+	return "  " + keys + strings.Repeat(" ", max(helpColumn-len([]rune(keys)), 3)) + desc
 }
 
 // helpSection renders the heading of one section plus its keys; the active one is marked.
@@ -352,7 +403,8 @@ func (m Model) commitLines() []string {
 		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.commit.err), m.width)))
 	}
 
-	lines = append(lines, styles.MetaPlain.Render(truncate("ctrl+s: confirmar · esc: cancelar · enter: nueva línea", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate(m.keys.Label(keymap.ActionGitCommitSave)+": confirmar · "+
+		m.keys.Label(keymap.ActionGitCommitCancel)+": cancelar · enter: nueva línea", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
@@ -371,7 +423,8 @@ func (m Model) promptLines() []string {
 		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.prompt.err), m.width)))
 	}
 
-	lines = append(lines, styles.MetaPlain.Render(truncate("enter: confirmar · esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate(m.keys.Label(keymap.ActionGitPromptConfirm)+": confirmar · "+
+		m.keys.Label(keymap.ActionGitPromptCancel)+": cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
@@ -397,7 +450,8 @@ func (m Model) confirmLines() []string {
 		lines = append(lines, styles.FailPlain.Render(truncate("error: "+describeError(m.confirm.err), m.width)))
 	}
 
-	lines = append(lines, styles.MetaPlain.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate(m.keys.Label(keymap.ActionGitConfirmYes)+": confirmar · "+
+		m.keys.Label(keymap.ActionGitConfirmNo)+": cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }

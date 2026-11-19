@@ -4,10 +4,10 @@ TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploració
 y edición rápida de archivos, control completo de Git y monitorización de
 contenedores Docker. Funciona con teclado y ratón.
 
-Estado actual: **v0.4.0 (mejoras de interfaz)**. Sobre v0.3.2, esta versión hace
-clicables las pestañas, mantiene el resaltado de sintaxis al editar, enmarca
-cada panel con el foco visible y limita el panel Docker a los contenedores del
-proyecto abierto. Los instaladores de v0.3.2 se mantienen sin cambios.
+Estado actual: **v0.5.0 (temas y atajos configurables)**. Sobre v0.4.0, esta
+versión añade un catálogo de cuatro temas, configuración JSON en XDG para tema y
+atajos, ayuda/footers generados desde el registro y un overlay `,` para
+consultar la configuración. Los instaladores no cambian.
 
 ## Demo
 
@@ -40,6 +40,12 @@ solo se puebla con `make dev-docker` (ver [Docker y socket](#docker-y-socket)).
   Compose (nombre, imagen, estado, health, puertos), con `a` para ver todos los
   contenedores del daemon. Muestra puntual de `stats`, `logs` paginados sin
   `follow` y acciones `start`/`stop`/`restart` con confirmación.
+- **Temas y atajos configurables:** cuatro temas (Tokyo Night, Catppuccin Mocha,
+  Dracula y Gruvbox Dark) y overrides de teclado mediante un `config.json` en
+  XDG; `--list-themes` y `--list-keys` muestran los catálogos.
+- **Configuración a la vista:** `,` abre un overlay read-only con la ruta del
+  archivo, el tema activo y los overrides; `--init-config` y `--print-config`
+  escriben un archivo base o imprimen la configuración resuelta.
 - **Multiplataforma y bajo consumo:** binarios estáticos (`CGO_ENABLED=0`) para
   linux/darwin/windows en amd64 y arm64.
 
@@ -79,7 +85,9 @@ tui-editor/
 │   └── tui/
 │       ├── app/           # modelo raíz, pestañas, layout y ratón
 │       ├── common/        # piezas compartidas (diff)
-│       └── components/    # filetree, editor, gitpanel y dockerpanel
+│       ├── components/    # filetree, editor, gitpanel y dockerpanel
+│       ├── keymap/        # registro de acciones, parser de teclas, overrides y ayuda
+│       └── styles/        # catálogo de temas y tokens visuales
 ├── scripts/               # install.sh (Linux/macOS) e install.ps1 (Windows)
 ├── .air.toml
 ├── .dockerignore
@@ -92,6 +100,7 @@ tui-editor/
 ├── README.md
 ├── SECURITY.md
 ├── compose.yaml
+├── config.example.json
 ├── go.mod
 └── go.sum
 ```
@@ -144,14 +153,14 @@ Opciones de `install.sh`:
 ```bash
 # Versión concreta y directorio propio
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
-  | sh -s -- --version v0.3.2 --dir "$HOME/bin"
+  | sh -s -- --version v0.5.0 --dir "$HOME/bin"
 
 # Sin verificar el checksum (no recomendado)
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
   | sh -s -- --no-verify
 ```
 
-Opciones de `install.ps1`: `-Version v0.3.2`, `-Dir C:\Tools\tui-editor`,
+Opciones de `install.ps1`: `-Version v0.5.0`, `-Dir C:\Tools\tui-editor`,
 `-NoVerify` y `-NoPath` (no tocar el `PATH` de usuario).
 
 Ningún instalador requiere `sudo` por sí mismo: si escribes en un directorio del
@@ -182,12 +191,12 @@ linux/darwin/windows × amd64/arm64, más un `checksums.txt`, desde la página d
 [releases](https://github.com/MiguelFPP/tui-editor/releases).
 
 El nombre del asset **incluye la versión**, así que sustituye `<version>` por la
-versión publicada (por ejemplo `0.3.2`; el prefijo `v` no forma parte del
+versión publicada (por ejemplo `0.5.0`; el prefijo `v` no forma parte del
 nombre):
 
 ```bash
 # Linux amd64
-version=0.3.2
+version=0.5.0
 curl -fL -O "https://github.com/MiguelFPP/tui-editor/releases/download/v${version}/tui-editor_${version}_linux_amd64.tar.gz"
 tar -xzf "tui-editor_${version}_linux_amd64.tar.gz"
 ./tui-editor --version
@@ -229,7 +238,7 @@ Para inyectar la versión igual que GoReleaser:
 
 ```bash
 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.3.2 -X main.commit=$(git rev-parse --short HEAD)" \
+  -ldflags "-s -w -X main.version=0.5.0 -X main.commit=$(git rev-parse --short HEAD)" \
   -o tui-editor ./cmd/tui-editor
 ```
 
@@ -269,7 +278,127 @@ Si el daemon no está disponible (socket ausente, permiso denegado) el panel
 muestra un mensaje accionable y `r` reintenta sin tumbar la TUI. En `dev` y `app`
 el socket no está montado, así que el panel aparece como “no disponible”.
 
+## Configuración
+
+La configuración vive en un único archivo JSON (tema y atajos) y se resuelve en
+tres niveles —flags, variables de entorno y archivo— con esta correspondencia:
+
+| Dato | Flag | Env | Archivo | Default |
+| :--- | :--- | :--- | :--- | :--- |
+| Ruta del archivo | `--config FILE` | `TUI_EDITOR_CONFIG` | — | `$XDG_CONFIG_HOME/tui-editor/config.json` (`os.UserConfigDir()/tui-editor/config.json`) |
+| Tema | `--theme NAME` | `TUI_EDITOR_THEME` | `theme` | `tokyonight-night` |
+| Atajos | — | — | `keys` | defaults del registro |
+
+La precedencia es **flags > env > archivo > defaults**: el flag gana a la variable
+de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
+default.
+
+El repositorio incluye [`config.example.json`](config.example.json) como
+plantilla versionada con overrides de ejemplo; no se carga automáticamente.
+
+- Si el archivo por defecto **no existe, se ignora** sin error: arrancas con los
+  defaults del registro.
+- Si `--config` o `TUI_EDITOR_CONFIG` apuntan a un archivo inexistente, es un
+  **error**: la ruta explícita debe existir.
+- El JSON es **estricto**: campos desconocidos, JSON inválido, acciones
+  desconocidas, teclas inválidas, conflictos dentro de un mismo scope o teclas
+  reservadas producen un error accionable en `stderr` (código 1).
+- No hay recarga en caliente: reinicia la TUI para aplicar los cambios.
+
+Ejemplo de archivo:
+
+```json
+{
+  "theme": "catppuccin-mocha",
+  "keys": {
+    "quit": ["q"],
+    "help": ["?"],
+    "tab_files": ["1"],
+    "tab_git": ["2"],
+    "tab_docker": ["3"],
+    "tree_up": ["up", "k"],
+    "tree_down": ["down", "j"],
+    "git_up": ["k", "up"],
+    "git_down": ["j", "down"],
+    "docker_up": ["k", "up"],
+    "docker_down": ["j", "down"],
+    "git_stage": ["s"],
+    "docker_logs": ["l"]
+  }
+}
+```
+
+Sobre el bloque `keys`:
+
+- Una acción omitida conserva su default; si la incluyes, tu array **sustituye la
+  lista completa** de esa acción (no se fusiona con el default).
+- Cada acción admite una cadena o una lista: `"quit": "q"` equivale a
+  `"quit": ["q"]`.
+- Las acciones modales (confirmaciones, commit, prompt y logs) **no son
+  configurables**.
+- `ctrl+c` siempre sale; `esc` y `enter` están reservados para modales y ayuda y
+  no se pueden asignar en overrides.
+- `--list-keys` imprime todos los IDs, su scope, sus teclas por defecto y si son
+  configurables o fijas.
+- `--list-themes` imprime el catálogo y marca el default.
+
+### Archivo base
+
+```bash
+tui-editor --init-config
+tui-editor --init-config --force
+tui-editor --print-config
+```
+
+- `--init-config` escribe un archivo base mínimo (`theme: tokyonight-night`,
+  `keys: {}`) en la ruta resuelta (XDG o `--config`); no sobrescribe sin
+  `--force`.
+- `--print-config` imprime la configuración resuelta en JSON con `config_path`,
+  `theme` y `keys`; no arranca la TUI.
+- `config.example.json` es una plantilla con overrides de ejemplo; no se carga
+  automáticamente.
+
+### Configuración desde la TUI
+
+- `,` abre el overlay read-only.
+- Muestra el archivo cargado (o “sin archivo (defaults)”), el tema activo y el
+  número y la lista de overrides.
+- `,` o `esc` lo cierran; el ratón se ignora.
+- Es read-only: edita el archivo y reinicia para aplicar; no hay recarga en
+  caliente.
+- La tecla `,` es configurable como el resto de acciones (ID `config`).
+
+### Temas
+
+| Nombre | Estilo Chroma | Descripción | Default |
+| :--- | :--- | :--- | :---: |
+| `tokyonight-night` | `tokyonight-night` | Tokyo Night | Sí |
+| `catppuccin-mocha` | `catppuccin-mocha` | Catppuccin Mocha | — |
+| `dracula` | `dracula` | Dracula | — |
+| `gruvbox-dark` | `gruvbox` | Gruvbox Dark | — |
+
+Un `--theme`/`TUI_EDITOR_THEME`/`theme` fuera de este catálogo es un error que
+lista los nombres válidos. El tema colorea los tokens de la interfaz y el
+resaltado de sintaxis del preview (Chroma).
+
+### Ejemplos de uso
+
+```bash
+tui-editor --theme dracula
+TUI_EDITOR_THEME=gruvbox-dark tui-editor
+tui-editor --config ~/.config/tui-editor/config.json
+tui-editor --list-themes
+tui-editor --list-keys
+```
+
 ## Pestañas y atajos
+
+Los atajos de las tablas son los **defaults**: se pueden sobrescribir en
+`config.json` (ver [Configuración](#configuración)) y `--list-keys` muestra el ID
+de cada acción. La ayuda `?` refleja siempre las teclas **efectivas**, es decir,
+las que resultan de aplicar los overrides sobre los defaults. Las teclas modales
+(`enter`, `esc`, `y`, `n`, `ctrl+s`) permanecen **fijas**, igual que `ctrl+c` para
+salir.
 
 | Atajo | Acción |
 | --- | --- |
@@ -277,6 +406,7 @@ el socket no está montado, así que el panel aparece como “no disponible”.
 | clic en la pestaña | Cambiar de pestaña, con el mismo efecto que `1`/`2`/`3` |
 | `tab` / `shift+tab` | Alternar el foco en `Files`; cambiar de sección en `Git` |
 | `?` | Mostrar u ocultar la ayuda |
+| `,` | Ver la configuración (overlay read-only) |
 | `esc` | Cerrar la ayuda o reenviar la tecla al panel |
 | `q` / `ctrl+c` | Salir |
 
@@ -445,8 +575,8 @@ El release se dispara con un tag `v*`:
 
 ```bash
 # el usuario crea el tag; el workflow .github/workflows/release.yml publica
-git tag v0.3.2
-git push origin v0.3.2
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 El workflow usa GoReleaser v2.20.2 (`.goreleaser.yaml`) y `GITHUB_TOKEN` para
@@ -457,14 +587,22 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 
 | Flag | Default | Descripción |
 | --- | --- | --- |
-| `--version` | — | Imprime `tui-editor 0.3.2` (builds de release añaden el commit) y sale con código 0 |
+| `--version` | — | Imprime `tui-editor 0.5.0` (builds de release añaden el commit) y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |
 | `--debug-log FILE` | vacío | Archivo de log de depuración |
+| `--config FILE` | `$XDG_CONFIG_HOME/tui-editor/config.json` | Archivo JSON de temas y atajos; si se indica explícitamente debe existir |
+| `--theme NAME` | `tokyonight-night` | Tema de color; `--list-themes` muestra los válidos |
+| `--list-themes` | — | Lista los temas disponibles y sale |
+| `--list-keys` | — | Lista las acciones, su scope, sus teclas por defecto y si son configurables, y sale |
+| `--init-config` | — | Escribe un archivo base y sale; no sobrescribe sin `--force` |
+| `--force` | — | Permite sobrescribir con `--init-config` |
+| `--print-config` | — | Imprime la configuración resuelta en JSON y sale |
 
 `--help` muestra el uso. Los errores de validación se imprimen en `stderr` y el
-proceso termina con código 1. `--version` no valida el resto de flags.
+proceso termina con código 1. `--version`, `--list-themes`, `--list-keys`,
+`--init-config` y `--print-config` no validan repositorio, editor ni Docker.
 
 ```bash
 docker compose run --rm --no-deps -T dev go run ./cmd/tui-editor --version

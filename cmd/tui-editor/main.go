@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -15,12 +18,14 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/app"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
 // version and commit are overridden at build time with
 // -ldflags "-X main.version=... -X main.commit=...".
 var (
-	version = "0.4.0"
+	version = "0.5.0"
 	commit  = "dev"
 )
 
@@ -48,6 +53,57 @@ func run() error {
 		return nil
 	}
 
+	// The catalogs are static: listing them neither reads the config file nor
+	// starts the TUI.
+	if cfg.ListThemes {
+		printThemes(os.Stdout)
+
+		return nil
+	}
+	if cfg.ListKeys {
+		printKeys(os.Stdout)
+
+		return nil
+	}
+
+	// --init-config writes the template and exits; the path goes to stdout so it
+	// can be piped, and no repository, editor or Docker check runs.
+	if cfg.InitConfig {
+		if err := config.WriteDefault(cfg.ConfigPath, cfg.Force); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(os.Stdout, cfg.ConfigPath)
+
+		return nil
+	}
+
+	// --print-config dumps the resolved values without starting the TUI.
+	if cfg.PrintConfig {
+		if err := printConfig(os.Stdout, cfg); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	keys, err := keymap.Default().Apply(cfg.Keys)
+	if err != nil {
+		return fmt.Errorf("aplicar atajos: %w", err)
+	}
+
+	// The palette is settled before the adapters so every style token is ready
+	// when the views render.
+	theme := styles.DefaultTheme()
+	if cfg.Theme != "" {
+		var ok bool
+		theme, ok = styles.ThemeByName(cfg.Theme)
+		if !ok {
+			return fmt.Errorf("tema desconocido %q; disponibles: %s", cfg.Theme, strings.Join(styles.ThemeNames(), ", "))
+		}
+	}
+	styles.Apply(theme)
+
 	root, err := domain.NewRepoPath(cfg.Repo)
 	if err != nil {
 		return fmt.Errorf("resolver la raíz del repositorio: %w", err)
@@ -74,7 +130,7 @@ func run() error {
 		dockerSvc = service
 	}
 
-	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc}
+	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc, Keys: keys}
 
 	program := tea.NewProgram(app.New(deps))
 	if _, err := program.Run(); err != nil {
@@ -92,4 +148,79 @@ func versionLine() string {
 	}
 
 	return fmt.Sprintf("tui-editor %s (%s)", version, commit)
+}
+
+// printThemes writes the theme catalog, one row per theme, flagging the default.
+func printThemes(w io.Writer) {
+	if w == nil {
+		w = io.Discard
+	}
+
+	def := styles.DefaultTheme().Name
+	for _, theme := range styles.Themes() {
+		suffix := ""
+		if theme.Name == def {
+			suffix = " (default)"
+		}
+
+		fmt.Fprintf(w, "%-20s %s%s\n", theme.Name, theme.Description, suffix)
+	}
+}
+
+// printKeys writes the default bindings, one row per action, with the effective
+// keys. User overrides are not applied on purpose: this documents the defaults.
+func printKeys(w io.Writer) {
+	if w == nil {
+		w = io.Discard
+	}
+
+	keys := keymap.Default()
+
+	fmt.Fprintln(w, "accion\tscope\tteclas\ttipo")
+	for _, binding := range keys.All() {
+		kind := "configurable"
+		if !binding.Configurable {
+			kind = "fija"
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", binding.Action, binding.Scope, keys.Label(binding.Action), kind)
+	}
+}
+
+// printConfig writes the resolved configuration as indented JSON. It only reads
+// cfg: the theme is validated against the catalog but the palette and the
+// keymap are not applied, because no view is rendered.
+func printConfig(w io.Writer, cfg config.Config) error {
+	if w == nil {
+		w = io.Discard
+	}
+
+	name := strings.TrimSpace(cfg.Theme)
+	if name == "" {
+		name = styles.DefaultTheme().Name
+	}
+	if _, ok := styles.ThemeByName(name); !ok {
+		return fmt.Errorf("tema desconocido %q; disponibles: %s", name, strings.Join(styles.ThemeNames(), ", "))
+	}
+
+	// A fresh, never-nil map keeps the JSON stable: with no overrides the output
+	// is "keys": {} instead of null.
+	keys := make(map[string][]string, len(cfg.Keys))
+	for action, list := range cfg.Keys {
+		keys[action] = append([]string{}, list...)
+	}
+
+	out := struct {
+		ConfigPath string              `json:"config_path"`
+		Theme      string              `json:"theme"`
+		Keys       map[string][]string `json:"keys"`
+	}{ConfigPath: cfg.ConfigPath, Theme: name, Keys: keys}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(out); err != nil {
+		return fmt.Errorf("imprimir la configuración: %w", err)
+	}
+
+	return nil
 }

@@ -3,6 +3,7 @@ package dockerpanel
 import (
 	"strings"
 
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -88,14 +89,14 @@ func (m Model) footerText() string {
 	}
 
 	parts = append(parts,
-		"j/k: mover",
-		"enter: stats",
-		"l: logs",
+		m.keys.Label(keymap.ActionDockerUp)+"/"+m.keys.Label(keymap.ActionDockerDown)+": mover",
+		m.keys.Label(keymap.ActionDockerStats)+": stats",
+		m.keys.Label(keymap.ActionDockerLogs)+": logs",
 		m.scopeHint(),
-		"s: start",
-		"x: stop",
-		"R: restart",
-		"r: refrescar",
+		m.keys.Label(keymap.ActionDockerStart)+": start",
+		m.keys.Label(keymap.ActionDockerStop)+": stop",
+		m.keys.Label(keymap.ActionDockerRestart)+": restart",
+		m.keys.Label(keymap.ActionDockerRefresh)+": refrescar",
 	)
 
 	return strings.Join(parts, columnSeparator)
@@ -110,14 +111,16 @@ func (m Model) confirmLines() []string {
 		lines = append(lines, styles.MetaPlain.Render(truncate("actuando…", m.width)))
 	}
 
-	lines = append(lines, styles.MetaPlain.Render(truncate("y/enter: confirmar · n/esc: cancelar", m.width)))
+	lines = append(lines, styles.MetaPlain.Render(truncate(m.keys.Label(keymap.ActionDockerConfirmYes)+": confirmar · "+
+		m.keys.Label(keymap.ActionDockerConfirmNo)+": cancelar", m.width)))
 
 	return pad(lines, m.bodyHeight()+footerRows)
 }
 
 // logsView renders the logs title, the scrollable viewport and its hints.
 func (m Model) logsView() string {
-	footer := "esc: cerrar · r: recargar · ↑/↓, rueda: desplazar"
+	footer := m.keys.Label(keymap.ActionDockerLogsClose) + ": cerrar · " +
+		m.keys.Label(keymap.ActionDockerLogsReload) + ": recargar · ↑/↓, rueda: desplazar"
 
 	switch {
 	case m.loadingLogs && len(m.logLines) == 0:

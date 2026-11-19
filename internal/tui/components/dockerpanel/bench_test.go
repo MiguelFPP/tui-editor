@@ -6,13 +6,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // BenchmarkInactiveTickNoPoll shows that a tick of a hidden or stale tab never reaches the port and
 // does not allocate: the guard returns before any Docker call or new timer is built.
 func BenchmarkInactiveTickNoPoll(b *testing.B) {
 	docker := fakes.NewDockerService()
-	m := New(docker, "")
+	m := New(docker, "", keymap.Default())
 	m.interval = 0
 	m.SetSize(100, 24)
 

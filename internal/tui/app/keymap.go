@@ -1,37 +1,32 @@
 package app
 
-import "github.com/MiguelFPP/tui-editor/internal/tui/styles"
+import (
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
+	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
+)
 
-// binding is one documented root keymap entry, rendered in the help overlay.
-type binding struct {
-	keys string
-	desc string
-}
+// helpLines renders the full keymap shown by the help overlay: the root scope of
+// the registry, plus the keys every panel documents in its own footer.
+func helpLines(keys keymap.Registry) []string {
+	bindings := keys.Bindings(keymap.ScopeRoot)
 
-// bindings are the root-level shortcuts; panels add their own documentation.
-var bindings = []binding{
-	{keys: "1 / 2 / 3", desc: "cambiar de pestaña (Files, Git, Docker)"},
-	{keys: "tab", desc: "alternar el foco entre el árbol y el editor"},
-	{keys: "shift+tab", desc: "alternar el foco en sentido inverso"},
-	{keys: "esc", desc: "cerrar la ayuda o reenviarla al panel"},
-	{keys: "?", desc: "mostrar u ocultar esta ayuda"},
-	{keys: "q / ctrl+c", desc: "salir"},
-}
-
-// helpLines renders the full keymap shown by the help overlay.
-func helpLines() []string {
-	lines := make([]string, 0, len(bindings)+5)
+	lines := make([]string, 0, len(bindings)+6)
 	lines = append(lines, styles.HelpTitle.Render("tui-editor · atajos"))
 	lines = append(lines, "")
 
-	for _, b := range bindings {
-		lines = append(lines, styles.HelpKey.Render(b.keys)+"  "+b.desc)
+	for _, binding := range bindings {
+		lines = append(lines, styles.HelpKey.Render(keys.Label(binding.Action))+"  "+binding.Desc)
 	}
 
+	lines = append(lines, styles.HelpKey.Render("esc")+"  cerrar la ayuda o reenviarla al panel")
 	lines = append(lines, "")
-	lines = append(lines, "files: e edita el archivo, ctrl+s guarda y E abre el editor externo")
-	lines = append(lines, "git: 2 abre la pestaña; dentro, ? documenta cada sección y sus modales")
-	lines = append(lines, "docker: 3 abre la pestaña; l logs, s/x/R start/stop/restart con confirmación")
+	lines = append(lines, "files: "+keys.Label(keymap.ActionEditorEdit)+" edita el archivo, "+
+		keys.Label(keymap.ActionEditorSave)+" guarda y "+keys.Label(keymap.ActionEditorExternal)+" abre el editor externo")
+	lines = append(lines, "git: "+keys.Label(keymap.ActionTabGit)+" abre la pestaña; dentro, "+
+		keys.Label(keymap.ActionGitHelp)+" documenta cada sección y sus modales")
+	lines = append(lines, "docker: "+keys.Label(keymap.ActionTabDocker)+" abre la pestaña; "+
+		keys.Label(keymap.ActionDockerLogs)+" logs, "+keys.Label(keymap.ActionDockerStart)+"/"+
+		keys.Label(keymap.ActionDockerStop)+"/"+keys.Label(keymap.ActionDockerRestart)+" start/stop/restart con confirmación")
 
 	return lines
 }

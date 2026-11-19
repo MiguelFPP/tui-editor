@@ -1,11 +1,14 @@
 package app
 
 import (
+	"fmt"
 	"image"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -17,6 +20,13 @@ const tabSeparator = "│"
 
 // borderSide is the chrome one panel box spends on each of its four sides.
 const borderSide = 1
+
+// helpPadding is the horizontal padding styles.Help adds on each side.
+const helpPadding = 2
+
+// overlayBoxChrome is the cells the shared overlay box spends: a frame plus the
+// padding on both sides. Long lines are clipped to what is left of the canvas.
+const overlayBoxChrome = 2 * (borderSide + helpPadding)
 
 // resetStyle closes the attributes a clipped panel row may leave open.
 const resetStyle = "\x1b[m"
@@ -99,8 +109,11 @@ func (m Model) render() string {
 	lines = append(lines, m.statusLine(width))
 
 	content := strings.Join(lines, "\n")
-	if m.help {
+	switch {
+	case m.help:
 		return m.helpOverlay(content, width, height)
+	case m.configOpen:
+		return m.configOverlay(content, width, height)
 	}
 
 	return content
@@ -187,10 +200,10 @@ func (m Model) statusLine(width int) string {
 		"repo: " + m.repoLabel(),
 		"tab: " + m.tab.String(),
 		"foco: " + m.focusLabel(),
-		"1/2/3 tabs",
-		"tab foco",
-		"? ayuda",
-		"q salir",
+		m.tabsHint(),
+		m.keys.Label(keymap.ActionFocusNext) + " foco",
+		m.keys.Label(keymap.ActionHelp) + " ayuda",
+		m.keys.Label(keymap.ActionQuit) + " salir",
 	}
 
 	text := strings.Join(parts, " · ")
@@ -204,9 +217,89 @@ func (m Model) statusLine(width int) string {
 	return styles.Status.Render(clipCells(text, width))
 }
 
+// tabsHint names the keys that switch the top tabs, in tab order.
+func (m Model) tabsHint() string {
+	actions := [...]keymap.Action{keymap.ActionTabFiles, keymap.ActionTabGit, keymap.ActionTabDocker}
+
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, m.keys.Label(action))
+	}
+
+	return strings.Join(labels, "/") + " tabs"
+}
+
 // helpOverlay centers the help box over the layout without changing its size.
 func (m Model) helpOverlay(base string, width, height int) string {
-	box := styles.Help.Render(strings.Join(helpLines(), "\n"))
+	box := styles.Help.Render(strings.Join(helpLines(m.keys), "\n"))
+
+	return overlayBox(base, box, width, height)
+}
+
+// configOverlay centers the read-only configuration box over the layout.
+func (m Model) configOverlay(base string, width, height int) string {
+	box := styles.Help.Render(strings.Join(m.configLines(width), "\n"))
+
+	return overlayBox(base, box, width, height)
+}
+
+// configLines renders the configuration summary: the file, the theme, the key
+// overrides and the restart notice. Long lines are clipped to the canvas.
+func (m Model) configLines(width int) []string {
+	actions := m.overrideActions()
+
+	lines := make([]string, 0, len(actions)+6)
+	lines = append(lines, styles.HelpTitle.Render("configuración"))
+	lines = append(lines, "archivo: "+m.configFileLabel())
+	lines = append(lines, "tema: "+styles.CurrentTheme().Name)
+	lines = append(lines, fmt.Sprintf("overrides: %d", len(actions)))
+
+	if len(actions) == 0 {
+		lines = append(lines, "sin overrides")
+	} else {
+		for _, action := range actions {
+			lines = append(lines, "  "+action+": "+strings.Join(m.cfg.Keys[action], " / "))
+		}
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "edita el archivo y reinicia para aplicar")
+	lines = append(lines, m.keys.Label(keymap.ActionConfig)+" / esc: cerrar")
+
+	// A long path must not widen the box past the canvas and break the layout.
+	limit := max(width-overlayBoxChrome, 1)
+	for index, line := range lines {
+		lines[index] = clipCells(line, limit)
+	}
+
+	return lines
+}
+
+// configFileLabel names the loaded file, or reports the built-in defaults.
+func (m Model) configFileLabel() string {
+	if strings.TrimSpace(m.cfg.ConfigPath) == "" {
+		return "sin archivo (defaults)"
+	}
+
+	return m.cfg.ConfigPath
+}
+
+// overrideActions returns the actions with at least one override key, sorted.
+func (m Model) overrideActions() []string {
+	actions := make([]string, 0, len(m.cfg.Keys))
+	for action, keys := range m.cfg.Keys {
+		if len(keys) > 0 {
+			actions = append(actions, action)
+		}
+	}
+
+	sort.Strings(actions)
+
+	return actions
+}
+
+// overlayBox centers an already rendered box over base without resizing base.
+func overlayBox(base, box string, width, height int) string {
 	boxLines := strings.Split(box, "\n")
 
 	left := max((width-lipgloss.Width(box))/2, 0)
