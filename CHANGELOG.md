@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-19
+
+Exact highlighting for the side-by-side diff, read from the real content of each
+side.
+
+### Added
+
+- The side-by-side diff is highlighted from the real file content: each side is
+  resolved from `staged` (the index against the worktree for `git diff`, `HEAD`
+  against the index for `git diff --cached`). A multi-line construct such as a
+  raw string keeps its colour because the whole file is tokenised at once.
+- An approximate-highlight notice names the reason when a side has no exact
+  content: a binary file, a truncated file, or a path missing from the revision.
+- Blobs are read per revision (`git show :path` / `HEAD:path`), bounded to 1 MiB
+  and 2000 lines per side, so one file reserves at most twice that limit.
+
+### Changed
+
+- A rename reads its pre-image from `Diff.OrigPath`. A new or deleted file leaves
+  the missing side without exact content instead of failing the render.
+- The highlight cache key includes the exact mode and a read counter, so a late
+  answer invalidates the preview instead of leaving it stale.
+
+### Fixed
+
+- `--version` reported `tui-editor 0.6.0` on the v0.7.0 tree; the default version
+  now matches the release.
+
 ## [0.7.0] - 2026-11-19
 
 Two-column Git panel: framed columns, splitter, collapsible list and a
@@ -234,7 +262,8 @@ First runnable MVP.
 - Hexagonal layout (`domain`, `ports`, `adapters`, `tui`) with `main` as the
   composition root, plus shared fakes for tests.
 
-[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/MiguelFPP/tui-editor/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MiguelFPP/tui-editor/compare/v0.4.0...v0.5.0

@@ -4,10 +4,10 @@ TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploració
 y edición rápida de archivos, control completo de Git y monitorización de
 contenedores Docker. Funciona con teclado y ratón.
 
-Estado actual: **v0.6.0 (splitter y árbol minimizable)**. Sobre v0.5.0, esta
-versión añade el redimensionado del árbol con el ratón y con el teclado, el
-botón y la tecla para minimizarlo, y la persistencia de `tree_width` y
-`tree_collapsed` en `config.json`. Los instaladores no cambian.
+Estado actual: **v0.8.0 (diff partido con resaltado exacto)**. Sobre v0.7.0, esta
+versión resalta el diff partido con el contenido real del archivo, resuelve los
+lados según `staged` y avisa del resaltado aproximado cuando el archivo es
+binario, está truncado o falta en la revisión. Los instaladores no cambian.
 
 ## Demo
 
@@ -153,14 +153,14 @@ Opciones de `install.sh`:
 ```bash
 # Versión concreta y directorio propio
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
-  | sh -s -- --version v0.6.0 --dir "$HOME/bin"
+  | sh -s -- --version v0.8.0 --dir "$HOME/bin"
 
 # Sin verificar el checksum (no recomendado)
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
   | sh -s -- --no-verify
 ```
 
-Opciones de `install.ps1`: `-Version v0.6.0`, `-Dir C:\Tools\tui-editor`,
+Opciones de `install.ps1`: `-Version v0.8.0`, `-Dir C:\Tools\tui-editor`,
 `-NoVerify` y `-NoPath` (no tocar el `PATH` de usuario).
 
 Ningún instalador requiere `sudo` por sí mismo: si escribes en un directorio del
@@ -191,12 +191,12 @@ linux/darwin/windows × amd64/arm64, más un `checksums.txt`, desde la página d
 [releases](https://github.com/MiguelFPP/tui-editor/releases).
 
 El nombre del asset **incluye la versión**, así que sustituye `<version>` por la
-versión publicada (por ejemplo `0.6.0`; el prefijo `v` no forma parte del
+versión publicada (por ejemplo `0.8.0`; el prefijo `v` no forma parte del
 nombre):
 
 ```bash
 # Linux amd64
-version=0.6.0
+version=0.8.0
 curl -fL -O "https://github.com/MiguelFPP/tui-editor/releases/download/v${version}/tui-editor_${version}_linux_amd64.tar.gz"
 tar -xzf "tui-editor_${version}_linux_amd64.tar.gz"
 ./tui-editor --version
@@ -238,7 +238,7 @@ Para inyectar la versión igual que GoReleaser:
 
 ```bash
 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.6.0 -X main.commit=$(git rev-parse --short HEAD)" \
+  -ldflags "-s -w -X main.version=0.8.0 -X main.commit=$(git rev-parse --short HEAD)" \
   -o tui-editor ./cmd/tui-editor
 ```
 
@@ -398,6 +398,12 @@ columna sin perder contenido. Cada columna se dibuja en su propio marco.
 - Con el preview de 52 celdas o más, el diff se dibuja lado a lado: las líneas
   antiguas a la izquierda y las nuevas a la derecha, numeradas por lado y
   coloreadas por columna. Por debajo de ese ancho se mantiene el diff unificado.
+
+El diff partido resalta con el contenido real del archivo: cada lado se resuelve
+según `staged` (índice frente al árbol de trabajo, o `HEAD` frente al índice). La
+lectura se acota a 1 MiB y 2000 líneas por lado; con un archivo binario, truncado
+o ausente en la revisión, el preview muestra "resaltado aproximado" con el motivo.
+Cada lado ocupa como máximo ese límite, así que un archivo no reserva más del doble.
 
 ### Archivo base
 
@@ -639,8 +645,8 @@ El release se dispara con un tag `v*`:
 
 ```bash
 # el usuario crea el tag; el workflow .github/workflows/release.yml publica
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.8.0
+git push origin v0.8.0
 ```
 
 El workflow usa GoReleaser v2.20.2 (`.goreleaser.yaml`) y `GITHUB_TOKEN` para
@@ -651,7 +657,7 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 
 | Flag | Default | Descripción |
 | --- | --- | --- |
-| `--version` | — | Imprime `tui-editor 0.6.0` (builds de release añaden el commit) y sale con código 0 |
+| `--version` | — | Imprime `tui-editor 0.8.0` (builds de release añaden el commit) y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |

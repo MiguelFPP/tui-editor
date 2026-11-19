@@ -185,6 +185,21 @@ func (s *Service) Show(ctx context.Context, hash string) (domain.CommitDetail, e
 	return detail, nil
 }
 
+// FileAt reads the blob of one path at the given revision.
+func (s *Service) FileAt(ctx context.Context, rev domain.FileRev, path domain.RelPath) (domain.RevisionContent, error) {
+	spec, err := blobSpec(rev, path)
+	if err != nil {
+		return domain.RevisionContent{}, err
+	}
+
+	result, err := s.runner.Run(ctx, "show", "--no-color", "--no-ext-diff", "--no-textconv", "--no-patch", "--format=", spec)
+	if err != nil {
+		return domain.RevisionContent{}, fileAtError(err)
+	}
+
+	return parseBlob(path, rev, result.Stdout, result.Truncated)
+}
+
 // translateError maps the technical failures of git onto the domain sentinels.
 func translateError(op string, err error) error {
 	if err == nil {

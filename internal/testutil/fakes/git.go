@@ -18,6 +18,7 @@ type GitService struct {
 	OnStashes         func(ctx context.Context) ([]domain.StashEntry, error)
 	OnCommits         func(ctx context.Context, query domain.CommitQuery) (domain.CommitPage, error)
 	OnShow            func(ctx context.Context, hash string) (domain.CommitDetail, error)
+	OnFileAt          func(ctx context.Context, rev domain.FileRev, path domain.RelPath) (domain.RevisionContent, error)
 	OnStage           func(ctx context.Context, paths []domain.RelPath) error
 	OnUnstage         func(ctx context.Context, paths []domain.RelPath) error
 	OnStageHunks      func(ctx context.Context, diff domain.Diff, hunks []int) error
@@ -124,6 +125,18 @@ func (g *GitService) Show(ctx context.Context, hash string) (domain.CommitDetail
 	}
 
 	return domain.CommitDetail{}, nil
+}
+
+func (g *GitService) FileAt(ctx context.Context, rev domain.FileRev, path domain.RelPath) (domain.RevisionContent, error) {
+	g.record("FileAt", rev, path)
+	if err := ctx.Err(); err != nil {
+		return domain.RevisionContent{}, fmt.Errorf("FileAt: %w", err)
+	}
+	if fn := hook(&g.recorder, &g.OnFileAt); fn != nil {
+		return fn(ctx, rev, path)
+	}
+
+	return domain.RevisionContent{}, nil
 }
 
 func (g *GitService) Stage(ctx context.Context, paths []domain.RelPath) error {

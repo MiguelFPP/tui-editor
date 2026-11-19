@@ -15,6 +15,8 @@ type GitReader interface {
 	Stashes(ctx context.Context) ([]domain.StashEntry, error)
 	Commits(ctx context.Context, query domain.CommitQuery) (domain.CommitPage, error)
 	Show(ctx context.Context, hash string) (domain.CommitDetail, error)
+	// FileAt reads the content of one path at the given revision.
+	FileAt(ctx context.Context, rev domain.FileRev, path domain.RelPath) (domain.RevisionContent, error)
 }
 
 // GitStager moves files and hunks between the worktree and the index.
