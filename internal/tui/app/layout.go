@@ -44,10 +44,15 @@ func (m *Model) resize() {
 	if treeW > 0 {
 		treeInner = innerRect(0, headerRows, treeW, body)
 	}
+	// The hidden tree keeps the geometry of its visible form: its cursor must not be clamped.
+	treeArea := treeInner
+	if treeW == 0 {
+		treeArea = innerRect(0, headerRows, splitWidth(width, m.treeWidth), body)
+	}
 	editorInner := innerRect(treeW, headerRows, editorW, body)
 	panelInner := innerRect(0, headerRows, width, body)
 
-	m.tree.SetBounds(treeInner.Min.X, treeInner.Min.Y, treeInner.Dx(), treeInner.Dy())
+	m.tree.SetBounds(treeArea.Min.X, treeArea.Min.Y, treeArea.Dx(), treeArea.Dy())
 	if m.hasEditor {
 		m.editor.SetSize(editorInner.Dx(), editorInner.Dy())
 	}

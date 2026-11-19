@@ -335,7 +335,7 @@ func TestDragReleaseWithoutASaverIsSafe(t *testing.T) {
 	}
 }
 
-func TestCollapseButtonClickIsConsumedWithoutAToggle(t *testing.T) {
+func TestCollapseButtonClickTogglesWithoutStartingADrag(t *testing.T) {
 	m := newSized(t, testDeps(t), dragWidth, dragHeight)
 	m = openFile(t, m, "main.go") // the editor owns the keyboard
 
@@ -343,26 +343,28 @@ func TestCollapseButtonClickIsConsumedWithoutAToggle(t *testing.T) {
 	model, cmd := pressMsg(t, m, click(m.collapseRect.Min.X, m.collapseRect.Min.Y))
 
 	if cmd != nil {
-		t.Errorf("command = %v, want nil", cmd)
+		t.Errorf("command = %v, want nil without a saver", cmd)
 	}
-	if model.treeCollapsed {
-		t.Error("treeCollapsed = true, want the button inert until 2.5")
+	if model.dragging || model.dragDirty {
+		t.Errorf("dragging/dirty = %v/%v, want the button click kept away from the handle", model.dragging, model.dragDirty)
 	}
-	if model.dragging {
-		t.Error("dragging = true, want the button click kept away from the handle")
+	if !model.treeCollapsed {
+		t.Fatal("treeCollapsed = false, want the button to hide the tree")
 	}
-	if got := model.treeWidthNow(dragWidth); got != before {
-		t.Errorf("treeWidthNow(%d) = %d, want %d kept", dragWidth, got, before)
+	if got := model.treeWidthNow(dragWidth); got != 0 {
+		t.Errorf("treeWidthNow(%d) = %d, want 0 while hidden", dragWidth, got)
 	}
 	if got := model.Focus(); got != FocusEditor {
 		t.Errorf("Focus() = %v, want editor kept", got)
 	}
 
-	// Without an editor the same click must not steal the tree focus either.
-	plain := newSized(t, testDeps(t), dragWidth, dragHeight)
-	plain, _ = pressMsg(t, plain, click(plain.collapseRect.Min.X, plain.collapseRect.Min.Y))
-	if got := plain.Focus(); got != FocusTree {
-		t.Errorf("Focus() = %v, want tree kept", got)
+	// The hidden tree keeps its width: the second click restores the previous split.
+	model, _ = pressMsg(t, model, click(model.collapseRect.Min.X, model.collapseRect.Min.Y))
+	if model.treeCollapsed {
+		t.Error("treeCollapsed = true, want the second click to show the tree again")
+	}
+	if got := model.treeWidthNow(dragWidth); got != before {
+		t.Errorf("treeWidthNow(%d) = %d, want %d restored", dragWidth, got, before)
 	}
 }
 

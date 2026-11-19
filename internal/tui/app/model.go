@@ -374,6 +374,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return m.setTab(GitTab), false
 	case keymap.ActionTabDocker:
 		return m.setTab(DockerTab), false
+	case keymap.ActionToggleTree:
+		return m.toggleTree(), false
 	case keymap.ActionFocusNext, keymap.ActionFocusPrev:
 		// Outside the Files tab the key belongs to the panel, which uses it for its own sections.
 		if m.tab == FilesTab {
@@ -432,7 +434,7 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	}
 
 	if m.onCollapse(msg.X, msg.Y) {
-		return nil // the button toggles the tree in 2.5; today it only swallows the click
+		return m.toggleTree() // the button mirrors the toggle key and never moves the selection
 	}
 
 	if splitter {
@@ -649,6 +651,30 @@ func (m *Model) toggleFocus() {
 	}
 
 	m.focus = FocusEditor
+}
+
+// toggleTree hides or shows the tree, leaving the keyboard in the editor either way.
+func (m *Model) toggleTree() tea.Cmd {
+	if m.tab != FilesTab {
+		return nil
+	}
+
+	m.treeCollapsed = !m.treeCollapsed
+	if m.treeCollapsed {
+		m.cancelDrag() // the handle disappears together with the tree
+	}
+	// The tree keeps its own state and never takes the keyboard back on its own.
+	m.focus = FocusEditor
+	m.resize()
+
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	width, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
 }
 
 // canSplit reports whether the Files tab shows a draggable splitter: a tree beside the editor.
