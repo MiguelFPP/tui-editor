@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `Git` panel shows the change list and the diff preview side by side in
+  `Cambios` and `Diff` when the panel is at least 100 cells wide; below that it
+  falls back to one column without losing content.
+- `L` toggles between one and two columns. `git_layout` (`split` / `single`)
+  persists the choice in `config.json`, preserving the theme, the key overrides
+  and the tree layout of the file.
+- Click and wheel act on the column under the pointer: the list moves its cursor
+  and the preview moves the hunk cursor without changing the selected file.
+- The diff body is highlighted with the Chroma lexer of the file, keeping the
+  gutter and the `+`/`-` markers; a file without a lexer stays plain.
+- `--print-config` and `--init-config` include `git_layout`.
+
+### Changed
+
+- Syntax highlighting moved to `internal/tui/common` so the editor and the Git
+  panel share the lexer cache.
+
 ## [0.6.0] - 2026-11-19
 
 Resizable and collapsible file tree.
