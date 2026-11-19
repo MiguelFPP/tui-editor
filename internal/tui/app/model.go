@@ -193,6 +193,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case tea.MouseClickMsg:
 		cmds = append(cmds, m.handleClick(msg))
+	case tea.MouseMotionMsg:
+		cmds = append(cmds, m.handleMotion(msg))
+	case tea.MouseReleaseMsg:
+		cmds = append(cmds, m.handleRelease(msg))
 	case tea.MouseWheelMsg:
 		cmds = append(cmds, m.handleWheel(msg))
 	case spinner.TickMsg:
@@ -412,14 +416,29 @@ func (m *Model) forwardKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 }
 
-// handleClick routes a click to the top tabs first and then to the panel under the cursor.
+// handleClick routes a click to the tabs, the tree button, the splitter or the panel.
 func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	if m.help || m.configOpen {
 		return nil
 	}
 
+	splitter := m.onSplitter(msg.X, msg.Y)
+	if !splitter {
+		m.cancelDrag() // a click away from the handle never keeps a drag alive
+	}
+
 	if tab, ok := m.tabAt(msg.X, msg.Y); ok {
 		return m.setTab(tab) // an active tab is a no-op: it never steals the focus
+	}
+
+	if m.onCollapse(msg.X, msg.Y) {
+		return nil // the button toggles the tree in 2.5; today it only swallows the click
+	}
+
+	if splitter {
+		m.dragging, m.dragDirty = true, false
+
+		return nil // resizing never moves the keyboard
 	}
 
 	panel, ok := m.panelAt(msg.X, msg.Y)
@@ -429,6 +448,69 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	m.focus = panel
 
 	return m.dispatchMouse(msg, panel)
+}
+
+// handleMotion resizes the tree while the border is dragged; the release persists it.
+func (m *Model) handleMotion(msg tea.MouseMotionMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	// The handle only exists in the Files tab with the tree visible.
+	if m.tab != FilesTab || m.treeCollapsed {
+		m.cancelDrag()
+
+		return nil
+	}
+
+	width, _ := m.canvas()
+	next := clamp(msg.X+1, minTree, max(width-minEditorBox, minTree))
+	if next == m.treeWidthNow(width) {
+		return nil
+	}
+
+	m.treeWidth = next
+	m.dragDirty = true
+	m.resize()
+
+	return nil
+}
+
+// handleRelease ends the drag and persists the layout once, only when the border moved.
+func (m *Model) handleRelease(tea.MouseReleaseMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	m.dragging = false
+	if !m.dragDirty {
+		return nil
+	}
+
+	m.dragDirty = false
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	width, collapsed := m.treeWidth, m.treeCollapsed
+
+	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
+}
+
+// cancelDrag drops a drag without persisting anything.
+func (m *Model) cancelDrag() {
+	m.dragging, m.dragDirty = false, false
+}
+
+// onSplitter reports whether the point falls on the draggable border of the Files tab.
+func (m Model) onSplitter(x, y int) bool {
+	return m.tab == FilesTab && m.canSplit() && image.Pt(x, y).In(m.splitterRect)
+}
+
+// onCollapse reports whether the point falls on the tree button of the Files tab.
+func (m Model) onCollapse(x, y int) bool {
+	return m.tab == FilesTab && image.Pt(x, y).In(m.collapseRect)
 }
 
 // handleWheel sends the wheel to the panel under the cursor, not to the focused one.
