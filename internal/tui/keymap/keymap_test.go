@@ -24,7 +24,7 @@ var expectedActions = []Action{
 	ActionGitStage, ActionGitUnstage, ActionGitCommit, ActionGitNewBranch, ActionGitDeleteBranch, ActionGitMerge,
 	ActionGitStash, ActionGitResolve, ActionGitResolveTheirs, ActionGitAbortMerge, ActionGitFetch, ActionGitPull,
 	ActionGitPush, ActionGitHunkPrev, ActionGitHunkNext, ActionGitHunkToggle, ActionGitRefresh, ActionGitHelp,
-	ActionGitBack, ActionGitLayoutToggle,
+	ActionGitBack, ActionGitLayoutToggle, ActionGitWidthShrink, ActionGitWidthGrow,
 
 	ActionGitCommitSave, ActionGitCommitCancel,
 
@@ -486,8 +486,8 @@ func TestAllAndConfigurableReturnCopiesAndCounts(t *testing.T) {
 	}
 
 	configurable := registry.Configurable()
-	if len(configurable) != 64 {
-		t.Errorf("Configurable() = %d bindings, want 64", len(configurable))
+	if len(configurable) != 66 {
+		t.Errorf("Configurable() = %d bindings, want 66", len(configurable))
 	}
 	for _, binding := range configurable {
 		if !binding.Configurable {

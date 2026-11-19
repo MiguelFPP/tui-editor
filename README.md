@@ -291,6 +291,7 @@ correspondencia:
 | Atajos | — | — | `keys` | defaults del registro |
 | Layout del árbol | — | — | `tree_width` / `tree_collapsed` | `0` / `false` (`0` = automático, 35 %) |
 | Layout del panel Git | — | — | `git_layout` | `split` |
+| Ancho de la lista Git | — | — | `git_list_width` | `0` (automático, 40 %) |
 
 La precedencia es **flags > env > archivo > defaults**: el flag gana a la variable
 de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
@@ -382,6 +383,9 @@ columna sin perder contenido.
 
 - `L` alterna entre una y dos columnas y guarda `git_layout` en `config.json`,
   conservando el tema, los atajos y el layout del árbol.
+- Cada columna se dibuja en su propio marco; el borde compartido se arrastra con
+  el ratón y `shift+left` / `shift+right` lo mueven dos celdas por pulsación. El
+  ancho elegido se guarda en `git_list_width` (`0` = automático, 40 %).
 - El clic y la rueda actúan sobre la columna bajo el cursor: la lista mueve su
   cursor y el preview mueve el cursor de hunks sin cambiar el archivo
   seleccionado.
@@ -507,6 +511,7 @@ imagen (igual que Git); si falta, la TUI muestra el error y sigue funcionando.
 | `o` / `t` / `A` | Resolver conflicto ours/theirs o abortar el merge (con confirmación) |
 | `f` / `p` / `P` | `fetch`, `pull`, `push` |
 | `L` | Alternar una o dos columnas en `Cambios`/`Diff` |
+| `shift+left` / `shift+right` | Reducir o ampliar la lista de cambios |
 | `r` | Refrescar estado, ramas, historial y stash |
 | `esc` | Cerrar el modal/ayuda o volver a `Cambios` |
 

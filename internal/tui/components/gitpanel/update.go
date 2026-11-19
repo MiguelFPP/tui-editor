@@ -35,6 +35,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.handleKey(msg)
 	case tea.MouseClickMsg:
 		return m, m.handleClick(msg.Mouse())
+	case tea.MouseMotionMsg:
+		return m, m.handleMotion(msg)
+	case tea.MouseReleaseMsg:
+		return m, m.handleRelease()
 	case tea.MouseWheelMsg:
 		m.handleWheel(msg.Mouse())
 	default:
@@ -92,6 +96,13 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 		return m.showSection(section)
 	}
 
+	if m.onSplitter(point) {
+		m.startDrag()
+
+		return nil
+	}
+	m.cancelDrag()
+
 	if m.split {
 		return m.clickColumn(point)
 	}
@@ -130,6 +141,50 @@ func (m *Model) clickColumn(point image.Point) tea.Cmd {
 	}
 
 	return nil
+}
+
+// handleMotion resizes the columns while the border is dragged.
+func (m *Model) handleMotion(msg tea.MouseMotionMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+	if !m.split {
+		m.cancelDrag()
+
+		return nil
+	}
+
+	m.dragTo(msg.X)
+
+	return nil
+}
+
+// handleRelease ends the drag and persists the width once, only when the border moved.
+func (m *Model) handleRelease() tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	m.dragging = false
+	if !m.dragDirty {
+		return nil
+	}
+
+	m.dragDirty = false
+
+	return m.saveLayoutCmd()
+}
+
+// saveLayoutCmd persists both layout fields, when a save seam is wired.
+func (m *Model) saveLayoutCmd() tea.Cmd {
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	layout, width := m.layout, m.listWidth
+
+	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout, width)} }
 }
 
 // handleKey routes the keyboard of the open modal first, then resolves the key against the Git
@@ -202,6 +257,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.help = !m.help
 	case keymap.ActionGitLayoutToggle:
 		return m.toggleLayout()
+	case keymap.ActionGitWidthShrink:
+		m.resizeList(-widthStep)
+
+		return m.saveLayoutCmd()
+	case keymap.ActionGitWidthGrow:
+		m.resizeList(widthStep)
+
+		return m.saveLayoutCmd()
 	}
 
 	return nil
@@ -218,14 +281,7 @@ func (m *Model) toggleLayout() tea.Cmd {
 	m.scrollList, m.scrollPreview = 0, 0
 	m.sync()
 
-	save := m.saveLayout
-	if save == nil {
-		return nil
-	}
-
-	layout := m.layout
-
-	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout)} }
+	return m.saveLayoutCmd()
 }
 
 // stageKey stages the selected file, or the marked hunks of the worktree diff.

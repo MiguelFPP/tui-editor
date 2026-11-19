@@ -213,7 +213,111 @@ func (m Model) splitBody(height int) []string {
 		out = append(out, left[row]+right[row])
 	}
 
+	if m.dragging {
+		out = m.paintSplitter(out)
+	}
+
 	return out
+}
+
+// paintSplitter redraws the shared border with the accent colour while it is dragged.
+func (m Model) paintSplitter(rows []string) []string {
+	edge := m.splitterRect.Min.X - m.bounds.Min.X
+	handle := styles.BorderFocused.Render("│")
+
+	for row := 1; row < len(rows)-1; row++ {
+		line := rows[row]
+		if visibleCells(line) <= edge {
+			continue
+		}
+
+		rows[row] = clipCells(line, edge) + handle + tailCells(line, edge+1)
+	}
+
+	return rows
+}
+
+// visibleCells counts the printable cells of a styled line.
+func visibleCells(line string) int {
+	count := 0
+	inEscape := false
+
+	for _, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+		case inEscape:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		default:
+			count++
+		}
+	}
+
+	return count
+}
+
+// clipCells cuts a styled line to width visible cells, keeping the escapes.
+func clipCells(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	var out strings.Builder
+	visible := 0
+	inEscape := false
+
+	for _, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+			out.WriteRune(r)
+		case inEscape:
+			out.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case visible >= width:
+			return out.String()
+		default:
+			out.WriteRune(r)
+			visible++
+		}
+	}
+
+	return out.String()
+}
+
+// tailCells returns a styled line from its n-th visible cell, keeping that cell's escapes.
+func tailCells(line string, cells int) string {
+	if cells <= 0 {
+		return line
+	}
+
+	var pending strings.Builder
+	visible := 0
+	inEscape := false
+
+	for i, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+			pending.WriteRune(r)
+		case inEscape:
+			pending.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case visible == cells:
+			return pending.String() + line[i:]
+		default:
+			visible++
+			pending.Reset()
+		}
+	}
+
+	return ""
 }
 
 // listPane renders the left column: its fixed header plus the scrollable rows.
@@ -487,6 +591,8 @@ func (m Model) helpLines() []string {
 			"refrescar estado, ramas, stash e historial"),
 		helpRow(m.keys.Label(keymap.ActionGitLayoutToggle),
 			"alternar una o dos columnas en Cambios y Diff"),
+		helpRow(m.keys.Label(keymap.ActionGitWidthShrink)+" / "+m.keys.Label(keymap.ActionGitWidthGrow),
+			"reducir o ampliar la lista (también arrastrando el borde)"),
 		helpRow(m.keys.Label(keymap.ActionGitFetch)+" / "+m.keys.Label(keymap.ActionGitPull)+" / "+m.keys.Label(keymap.ActionGitPush),
 			"fetch, pull y push"),
 		helpRow(m.keys.Label(keymap.ActionGitBack),

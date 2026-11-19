@@ -36,6 +36,7 @@ type Config struct {
 	TreeWidth     int
 	TreeCollapsed bool
 	GitLayout     string
+	GitListWidth  int
 	SavePath      string
 }
 
@@ -185,6 +186,9 @@ func loadConfig(configPath, theme string) (Config, error) {
 	if err := validateGitLayout(fileCfg.GitLayout); err != nil {
 		return Config{}, err
 	}
+	if fileCfg.GitListWidth < 0 {
+		return Config{}, fmt.Errorf("%w: git_list_width no puede ser negativo", ErrConfigFormat)
+	}
 
 	effectiveTheme := strings.TrimSpace(theme)
 	if effectiveTheme == "" {
@@ -197,6 +201,7 @@ func loadConfig(configPath, theme string) (Config, error) {
 		TreeWidth:     fileCfg.TreeWidth,
 		TreeCollapsed: fileCfg.TreeCollapsed,
 		GitLayout:     fileCfg.GitLayout,
+		GitListWidth:  fileCfg.GitListWidth,
 	}
 	if loaded {
 		cfg.ConfigPath = path

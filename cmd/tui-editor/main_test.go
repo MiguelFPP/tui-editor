@@ -95,6 +95,7 @@ type configOutput struct {
 	TreeWidth     int                 `json:"tree_width"`
 	TreeCollapsed bool                `json:"tree_collapsed"`
 	GitLayout     string              `json:"git_layout"`
+	GitListWidth  int                 `json:"git_list_width"`
 	Keys          map[string][]string `json:"keys"`
 }
 
@@ -150,7 +151,7 @@ func TestInitConfigTemplateHasTreeLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.ReadFile() error = %v", err)
 	}
-	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`, `"git_layout"`} {
+	for _, want := range []string{`"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("template = %q, want %s", body, want)
 		}
@@ -209,9 +210,9 @@ func TestPrintConfig(t *testing.T) {
 	}
 
 	// The field order stays stable: config_path, theme, tree_width,
-	// tree_collapsed, git_layout, keys.
+	// tree_collapsed, git_layout, git_list_width, keys.
 	last := -1
-	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"keys"`} {
+	for _, key := range []string{`"config_path"`, `"theme"`, `"tree_width"`, `"tree_collapsed"`, `"git_layout"`, `"git_list_width"`, `"keys"`} {
 		index := strings.Index(out.String(), key)
 		if index < 0 {
 			t.Fatalf("salida no incluye %s: %q", key, out.String())

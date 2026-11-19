@@ -23,6 +23,7 @@ const BaseFile = `{
   "tree_width": 0,
   "tree_collapsed": false,
   "git_layout": "split",
+  "git_list_width": 0,
   "keys": {}
 }
 `
@@ -91,15 +92,17 @@ func SaveLayout(path string, width int, collapsed bool) error {
 	return writeFileAtomic(target, string(data)+"\n", true)
 }
 
-// SaveGitLayout persists the Git panel layout, preserving the theme, the tree
-// layout and the key overrides of an existing file.
-func SaveGitLayout(path, layout string) error {
+// SaveGitLayout persists the Git panel layout: the mode and the explicit list width.
+func SaveGitLayout(path, layout string, listWidth int) error {
 	target := strings.TrimSpace(path)
 	if target == "" {
 		return fmt.Errorf("%w: ruta vacía", ErrConfigFile)
 	}
 	if err := validateGitLayout(layout); err != nil {
 		return err
+	}
+	if listWidth < 0 {
+		return fmt.Errorf("%w: git_list_width no puede ser negativo", ErrConfigFormat)
 	}
 
 	cfg, _, err := loadFile(target, false)
@@ -108,6 +111,7 @@ func SaveGitLayout(path, layout string) error {
 	}
 
 	cfg.GitLayout = strings.TrimSpace(layout)
+	cfg.GitListWidth = listWidth
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -175,6 +179,7 @@ type fileConfig struct {
 	TreeWidth     int                `json:"tree_width"`
 	TreeCollapsed bool               `json:"tree_collapsed"`
 	GitLayout     string             `json:"git_layout,omitempty"`
+	GitListWidth  int                `json:"git_list_width"`
 	Keys          map[string]KeyList `json:"keys,omitempty"`
 }
 

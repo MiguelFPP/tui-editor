@@ -102,6 +102,8 @@ const (
 	ActionGitHelp          Action = "git_help"
 	ActionGitBack          Action = "git_back"
 	ActionGitLayoutToggle  Action = "git_layout_toggle"
+	ActionGitWidthShrink   Action = "git_width_shrink"
+	ActionGitWidthGrow     Action = "git_width_grow"
 )
 
 // Actions of the Git modal scopes.
@@ -343,6 +345,8 @@ var catalog = []Binding{
 	{Action: ActionGitHelp, Scope: ScopeGit, Keys: []string{"?"}, Desc: "ayuda de Git", Configurable: true},
 	{Action: ActionGitBack, Scope: ScopeGit, Keys: []string{"esc"}, Desc: "cerrar panel Git", Configurable: true},
 	{Action: ActionGitLayoutToggle, Scope: ScopeGit, Keys: []string{"L"}, Desc: "alternar una o dos columnas", Configurable: true},
+	{Action: ActionGitWidthShrink, Scope: ScopeGit, Keys: []string{"shift+left"}, Desc: "reducir la lista de cambios", Configurable: true},
+	{Action: ActionGitWidthGrow, Scope: ScopeGit, Keys: []string{"shift+right"}, Desc: "ampliar la lista de cambios", Configurable: true},
 
 	// git commit
 	{Action: ActionGitCommitSave, Scope: ScopeGitCommit, Keys: []string{"ctrl+s"}, Desc: "guardar commit", Configurable: false},

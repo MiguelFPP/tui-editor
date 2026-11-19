@@ -79,6 +79,8 @@ const (
 	frameSide = 1
 	// listHeaderRows is the fixed header of the left column.
 	listHeaderRows = 1
+	// widthStep is the cells one keyboard resize moves the shared border.
+	widthStep = 2
 )
 
 // Section is one navigable block of the panel.
@@ -228,14 +230,20 @@ type Model struct {
 	tabRects [sectionCount]image.Rectangle
 	hunkRows []rowSpan
 
-	// Layout of the Changes and Diff sections: the persisted preference, the mode in force and
-	// the inner rectangles of both columns.
-	layout      Layout
-	split       bool
-	listW       int
-	previewW    int
-	listRect    image.Rectangle
-	previewRect image.Rectangle
+	// Layout of the Changes and Diff sections: the persisted preference, the mode in force, the
+	// inner rectangles of both columns and the draggable border between them.
+	layout       Layout
+	split        bool
+	listW        int
+	previewW     int
+	listRect     image.Rectangle
+	previewRect  image.Rectangle
+	splitterRect image.Rectangle
+
+	// listWidth is the explicit width of the left column; zero means the automatic ratio.
+	listWidth int
+	dragging  bool
+	dragDirty bool
 
 	// scrollList and scrollPreview are the independent offsets of the two columns.
 	scrollList    int
@@ -245,8 +253,8 @@ type Model struct {
 	highlighted  []string
 	highlightKey string
 
-	// saveLayout persists the layout preference; nil means it is not persisted.
-	saveLayout func(Layout) error
+	// saveLayout persists the layout preference and the list width; nil means they are not persisted.
+	saveLayout func(Layout, int) error
 
 	help bool
 }
@@ -334,7 +342,8 @@ func New(git ports.GitService, keys keymap.Registry) Model {
 // Options configures the panel at construction.
 type Options struct {
 	Layout     Layout
-	SaveLayout func(Layout) error
+	ListWidth  int
+	SaveLayout func(Layout, int) error
 }
 
 // NewWithOptions builds the panel with the persisted layout and the save seam.
@@ -347,6 +356,7 @@ func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Mo
 		git:        git,
 		keys:       keys,
 		layout:     opts.Layout,
+		listWidth:  max(opts.ListWidth, 0),
 		saveLayout: opts.SaveLayout,
 		loading:    loadingState{status: true, branches: true},
 		seqs:       seqState{status: 1, branches: 1},
@@ -602,15 +612,20 @@ func (m Model) splitWidths(panelW int) (int, int) {
 		return max(panelW, 0), 0
 	}
 
+	reserve := m.listWidth
+	if reserve <= 0 {
+		reserve = panelW * listPercent / 100
+	}
+
 	high := max(panelW-minGitPreview, minGitList)
-	list := min(max(panelW*listPercent/100, minGitList), high)
+	list := min(max(reserve, minGitList), high)
 
 	return list, max(panelW-list, 0)
 }
 
-// markColumns stores the inner rectangle of each column, or a single one when they share the body.
+// markColumns stores the inner rectangle of each column and of the border between them.
 func (m *Model) markColumns() {
-	m.listRect, m.previewRect = image.Rectangle{}, image.Rectangle{}
+	m.listRect, m.previewRect, m.splitterRect = image.Rectangle{}, image.Rectangle{}, image.Rectangle{}
 	if m.width <= 0 {
 		return
 	}
@@ -627,17 +642,18 @@ func (m *Model) markColumns() {
 		return
 	}
 
+	// The shared border of both frames is the drag handle; its cells are not clickable rows.
+	edge := m.bounds.Min.X + m.listW
+	m.splitterRect = image.Rect(edge-frameSide, top, edge+frameSide, top+height)
+
 	// The frames are chrome: the clickable area of each column starts one cell inside, and the
 	// left column skips its fixed header row.
 	listTop := top + frameSide + listHeaderRows
 	listHeight := max(innerCells(height)-listHeaderRows, 0)
-	m.listRect = image.Rect(m.bounds.Min.X+frameSide, listTop,
-		m.bounds.Min.X+m.listW-frameSide, listTop+listHeight)
+	m.listRect = image.Rect(m.bounds.Min.X+frameSide, listTop, edge-frameSide, listTop+listHeight)
 
-	previewLeft := m.bounds.Min.X + m.listW
 	previewHeight := max(innerCells(height), 0)
-	m.previewRect = image.Rect(previewLeft+frameSide, top+frameSide,
-		previewLeft+m.previewW-frameSide, top+frameSide+previewHeight)
+	m.previewRect = image.Rect(edge+frameSide, top+frameSide, edge+m.previewW-frameSide, top+frameSide+previewHeight)
 }
 
 // ListBounds returns the clickable area of the left column, frames excluded.
@@ -648,6 +664,61 @@ func (m Model) ListBounds() image.Rectangle {
 // PreviewBounds returns the clickable area of the right column, frames excluded.
 func (m Model) PreviewBounds() image.Rectangle {
 	return m.previewRect
+}
+
+// onSplitter reports whether the point falls on the draggable border between columns.
+func (m Model) onSplitter(point image.Point) bool {
+	return m.split && point.In(m.splitterRect)
+}
+
+// startDrag begins a resize of the shared border.
+func (m *Model) startDrag() {
+	m.dragging, m.dragDirty = true, false
+}
+
+// dragTo moves the border to column x, clamped to both column minimums.
+func (m *Model) dragTo(x int) {
+	if !m.dragging || !m.split {
+		return
+	}
+
+	next := m.clampListWidth(x - m.bounds.Min.X)
+	if next == m.listW {
+		return
+	}
+
+	m.listWidth = next
+	m.dragDirty = true
+	m.sync()
+}
+
+// cancelDrag drops a drag without persisting anything.
+func (m *Model) cancelDrag() {
+	m.dragging, m.dragDirty = false, false
+}
+
+// resizeList moves the border by delta cells and reports whether the layout changed.
+func (m *Model) resizeList(delta int) bool {
+	if !m.split {
+		return false
+	}
+
+	next := m.clampListWidth(m.listW + delta)
+	if next == m.listW {
+		return false
+	}
+
+	m.listWidth = next
+	m.sync()
+
+	return true
+}
+
+// clampListWidth keeps both columns above their minimums.
+func (m Model) clampListWidth(width int) int {
+	high := max(m.width-minGitPreview, minGitList)
+
+	return min(max(width, minGitList), high)
 }
 
 // listViewportHeight is the rows the left column can show, its header excluded.

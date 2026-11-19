@@ -197,7 +197,7 @@ func TestLayoutToggleFlipsThePreference(t *testing.T) {
 
 	m := NewWithOptions(gitFake(t), keymap.Default(), Options{
 		Layout:     LayoutSplit,
-		SaveLayout: func(layout Layout) error { saved = append(saved, layout); return nil },
+		SaveLayout: func(layout Layout, _ int) error { saved = append(saved, layout); return nil },
 	})
 	m.SetSize(120, 20)
 
@@ -266,7 +266,7 @@ func TestLayoutSavedMsgCarriesTheFailure(t *testing.T) {
 
 	m := NewWithOptions(gitFake(t), keymap.Default(), Options{
 		Layout:     LayoutSplit,
-		SaveLayout: func(Layout) error { return boom },
+		SaveLayout: func(Layout, int) error { return boom },
 	})
 	m.SetSize(120, 20)
 
