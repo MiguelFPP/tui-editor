@@ -35,6 +35,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, m.handleKey(msg)
 	case tea.MouseClickMsg:
 		return m, m.handleClick(msg.Mouse())
+	case tea.MouseMotionMsg:
+		return m, m.handleMotion(msg)
+	case tea.MouseReleaseMsg:
+		return m, m.handleRelease()
 	case tea.MouseWheelMsg:
 		m.handleWheel(msg.Mouse())
 	default:
@@ -50,23 +54,45 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleWheel scrolls the active section without moving its cursor.
+// handleWheel scrolls the active section without moving its cursor; in split mode it scrolls the
+// column under the pointer.
 func (m *Model) handleWheel(ev tea.Mouse) {
+	delta := 0
 	switch ev.Button {
 	case tea.MouseWheelUp:
-		m.offsets[m.section] -= wheelStep
+		delta = -wheelStep
 	case tea.MouseWheelDown:
-		m.offsets[m.section] += wheelStep
+		delta = wheelStep
 	default:
 		return
 	}
 
+	if m.split {
+		point := image.Pt(ev.X, ev.Y)
+		switch {
+		case point.In(m.listRect):
+			m.scrollListBy(delta)
+		case point.In(m.previewRect):
+			m.scrollPreviewBy(delta)
+		}
+
+		return
+	}
+
+	// A solo column scrolls the section, or the preview when the list is collapsed.
+	if m.listCollapsed {
+		m.scrollPreviewBy(delta)
+
+		return
+	}
+
+	m.offsets[m.section] += delta
 	rows := len(m.rows(m.section))
 	m.offsets[m.section] = min(max(m.offsets[m.section], 0), max(rows-m.bodyHeight(), 0))
 }
 
-// handleClick selects the row under the cursor; in Diff it also moves the hunk cursor to the hunk
-// that covers the row, and it never stages anything.
+// handleClick selects the row under the cursor. In split mode each column owns its own cursor, so a
+// click on the preview moves the hunk cursor and never changes the selected file.
 func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 	if ev.Button != tea.MouseLeft || m.help || m.CapturesInput() {
 		return nil
@@ -75,6 +101,17 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 	point := image.Pt(ev.X, ev.Y)
 	if section, ok := m.tabAt(point); ok {
 		return m.showSection(section)
+	}
+
+	if m.onSplitter(point) {
+		m.startDrag()
+
+		return nil
+	}
+	m.cancelDrag()
+
+	if m.split {
+		return m.clickColumn(point)
 	}
 
 	row, ok := m.rowAt(point)
@@ -91,6 +128,88 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 	}
 
 	return nil
+}
+
+// clickColumn routes a click of the split body to the column that owns the point.
+func (m *Model) clickColumn(point image.Point) tea.Cmd {
+	if row, ok := m.listRowAt(point); ok {
+		m.cursors[Changes] = row
+		m.scrollListToCursor()
+
+		return nil
+	}
+
+	row, ok := m.previewRowAt(point)
+	if !ok {
+		return nil
+	}
+	if hunk, ok := m.hunkAt(row); ok {
+		m.hunkCursor = hunk
+	}
+
+	return nil
+}
+
+// handleMotion resizes the columns while the border is dragged.
+func (m *Model) handleMotion(msg tea.MouseMotionMsg) tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+	if !m.split {
+		m.cancelDrag()
+
+		return nil
+	}
+
+	m.dragTo(msg.X)
+
+	return nil
+}
+
+// handleRelease ends the drag and persists the width once, only when the border moved.
+func (m *Model) handleRelease() tea.Cmd {
+	if !m.dragging {
+		return nil
+	}
+
+	m.dragging = false
+	if !m.dragDirty {
+		return nil
+	}
+
+	m.dragDirty = false
+
+	return m.saveLayoutCmd()
+}
+
+// saveLayoutCmd persists the layout fields, when a save seam is wired.
+func (m *Model) saveLayoutCmd() tea.Cmd {
+	save := m.saveLayout
+	if save == nil {
+		return nil
+	}
+
+	layout, width, collapsed := m.layout, m.listWidth, m.listCollapsed
+
+	return func() tea.Msg { return LayoutSavedMsg{Err: save(layout, width, collapsed)} }
+}
+
+// toggleList hides or shows the change list, leaving the preview with the whole width.
+func (m *Model) toggleList() tea.Cmd {
+	if m.layout == LayoutSingle && !m.listCollapsed {
+		return nil // there is no second column to hand the width to
+	}
+	if !m.split && !m.listCollapsed {
+		return nil // the panel is too narrow for two columns: nothing to collapse
+	}
+
+	m.listCollapsed = !m.listCollapsed
+	if m.listCollapsed {
+		m.cancelDrag()
+	}
+	m.sync()
+
+	return m.saveLayoutCmd()
 }
 
 // handleKey routes the keyboard of the open modal first, then resolves the key against the Git
@@ -161,9 +280,35 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.back()
 	case keymap.ActionGitHelp:
 		m.help = !m.help
+	case keymap.ActionGitLayoutToggle:
+		return m.toggleLayout()
+	case keymap.ActionGitWidthShrink:
+		m.resizeList(-widthStep)
+
+		return m.saveLayoutCmd()
+	case keymap.ActionGitWidthGrow:
+		m.resizeList(widthStep)
+
+		return m.saveLayoutCmd()
+	case keymap.ActionGitToggleList:
+		return m.toggleList()
 	}
 
 	return nil
+}
+
+// toggleLayout alternates between one and two columns and persists the choice.
+func (m *Model) toggleLayout() tea.Cmd {
+	if m.layout == LayoutSingle {
+		m.layout = LayoutSplit
+	} else {
+		m.layout = LayoutSingle
+	}
+
+	m.scrollList, m.scrollPreview = 0, 0
+	m.sync()
+
+	return m.saveLayoutCmd()
 }
 
 // stageKey stages the selected file, or the marked hunks of the worktree diff.
@@ -220,6 +365,11 @@ func (m *Model) moveCursor(delta int) {
 
 	m.cursors[m.section] = min(max(m.cursors[m.section]+delta, 0), rows-1)
 	m.scrollToCursor(m.section)
+
+	// The left column of the split body follows the cursor of the Changes section.
+	if m.split && m.section == Changes {
+		m.scrollListToCursor()
+	}
 }
 
 // activate opens the diff of the selected file, checks out the selected branch, or applies the

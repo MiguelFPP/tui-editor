@@ -290,6 +290,9 @@ correspondencia:
 | Tema | `--theme NAME` | `TUI_EDITOR_THEME` | `theme` | `tokyonight-night` |
 | Atajos | — | — | `keys` | defaults del registro |
 | Layout del árbol | — | — | `tree_width` / `tree_collapsed` | `0` / `false` (`0` = automático, 35 %) |
+| Layout del panel Git | — | — | `git_layout` | `split` |
+| Ancho de la lista Git | — | — | `git_list_width` | `0` (automático, 40 %) |
+| Lista Git minimizada | — | — | `git_list_collapsed` | `false` |
 
 La precedencia es **flags > env > archivo > defaults**: el flag gana a la variable
 de entorno, ambos ganan al archivo, y lo que no se define en ningún nivel usa el
@@ -315,6 +318,7 @@ Ejemplo de archivo:
   "theme": "catppuccin-mocha",
   "tree_width": 42,
   "tree_collapsed": false,
+  "git_layout": "split",
   "keys": {
     "quit": ["q"],
     "help": ["?"],
@@ -350,7 +354,8 @@ Sobre el bloque `keys`:
 Fuera de `keys`, el archivo guarda el layout del árbol: `tree_width` es el ancho
 exterior de la columna del árbol (`0` = automático, el 35 % del ancho),
 `tree_collapsed` arranca la pestaña `Files` con el árbol minimizado y un
-`tree_width` negativo es un error.
+`tree_width` negativo es un error. `git_layout` guarda la forma del panel Git:
+`split` (dos columnas) o `single` (una); cualquier otro valor es un error.
 
 ### Layout del árbol
 
@@ -369,6 +374,31 @@ El layout se guarda solo en `config.json` al cambiarlo, con `tree_width` y
 `tree_collapsed`: el resto del archivo (tema y atajos) se conserva y, si no
 existía, se crea. No hay recarga en caliente.
 
+### Layout del panel Git
+
+En las secciones `Cambios` y `Diff`, el panel muestra la lista a la izquierda y
+el preview del diff a la derecha cuando el ancho es de 100 celdas o más. La
+lista ocupa el 40 % con mínimo 28 celdas y el preview conserva al menos 34; por
+debajo de 100 celdas, o con `git_layout: "single"`, el panel vuelve a una sola
+columna sin perder contenido. Cada columna se dibuja en su propio marco.
+
+- `L` alterna entre una y dos columnas y guarda `git_layout` en `config.json`,
+  conservando el tema, los atajos y el layout del árbol.
+- El borde compartido se arrastra con el ratón y `shift+left` / `shift+right` lo
+  mueven dos celdas por pulsación. El ancho elegido se guarda en
+  `git_list_width` (`0` = automático, 40 %).
+- `H` minimiza la lista de cambios: el diff ocupa todo el ancho y la lista
+  conserva su cursor y su desplazamiento. El estado se guarda en
+  `git_list_collapsed`.
+- El clic y la rueda actúan sobre la columna bajo el cursor: la lista mueve su
+  cursor y el preview mueve el cursor de hunks sin cambiar el archivo
+  seleccionado.
+- El diff se colorea con el lexer del archivo, manteniendo el gutter y los
+  marcadores `+`/`-`; un archivo sin lexer se muestra plano.
+- Con el preview de 52 celdas o más, el diff se dibuja lado a lado: las líneas
+  antiguas a la izquierda y las nuevas a la derecha, numeradas por lado y
+  coloreadas por columna. Por debajo de ese ancho se mantiene el diff unificado.
+
 ### Archivo base
 
 ```bash
@@ -378,10 +408,11 @@ tui-editor --print-config
 ```
 
 - `--init-config` escribe un archivo base mínimo (`theme: tokyonight-night`,
-  `tree_width: 0`, `tree_collapsed: false`, `keys: {}`) en la ruta resuelta (XDG o
-  `--config`); no sobrescribe sin `--force`.
+  `tree_width: 0`, `tree_collapsed: false`, `git_layout: "split"`, `keys: {}`) en
+  la ruta resuelta (XDG o `--config`); no sobrescribe sin `--force`.
 - `--print-config` imprime la configuración resuelta en JSON con `config_path`,
-  `theme`, `tree_width`, `tree_collapsed` y `keys`; no arranca la TUI.
+  `theme`, `tree_width`, `tree_collapsed`, `git_layout` y `keys`; no arranca la
+  TUI.
 - `config.example.json` es una plantilla con overrides de ejemplo; no se carga
   automáticamente.
 
@@ -486,13 +517,17 @@ imagen (igual que Git); si falta, la TUI muestra el error y sigue funcionando.
 | `z` | Stash push (en Cambios) o stash pop (en Stash) |
 | `o` / `t` / `A` | Resolver conflicto ours/theirs o abortar el merge (con confirmación) |
 | `f` / `p` / `P` | `fetch`, `pull`, `push` |
+| `L` | Alternar una o dos columnas en `Cambios`/`Diff` |
+| `shift+left` / `shift+right` | Reducir o ampliar la lista de cambios |
+| `H` | Minimizar o mostrar la lista de cambios |
 | `r` | Refrescar estado, ramas, historial y stash |
 | `esc` | Cerrar el modal/ayuda o volver a `Cambios` |
 
 El panel Git es interactivo: prepara archivos y hunks, crea commits con mensaje
 multilínea, gestiona ramas y stash, detecta conflictos y sincroniza con el
 upstream. Las operaciones de escritura se serializan y nunca fuerzan push ni
-borran ramas sin confirmación.
+borran ramas sin confirmación. En `Cambios` y `Diff`, `L` alterna entre una y dos
+columnas cuando el panel tiene 100 celdas o más.
 
 ### Docker
 

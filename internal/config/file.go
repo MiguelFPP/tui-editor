@@ -16,12 +16,15 @@ import (
 const maxConfigBytes = 1 << 20
 
 // BaseFile is the template --init-config writes: a valid document with the
-// default theme, an unset tree layout and no key overrides. It always ends with
-// a newline.
+// default theme, an unset tree layout, the split Git layout and no key
+// overrides. It always ends with a newline.
 const BaseFile = `{
   "theme": "tokyonight-night",
   "tree_width": 0,
   "tree_collapsed": false,
+  "git_layout": "split",
+  "git_list_width": 0,
+  "git_list_collapsed": false,
   "keys": {}
 }
 `
@@ -90,6 +93,41 @@ func SaveLayout(path string, width int, collapsed bool) error {
 	return writeFileAtomic(target, string(data)+"\n", true)
 }
 
+// SaveGitLayout persists the Git panel layout: the mode, the list width and its collapsed state.
+func SaveGitLayout(path, layout string, listWidth int, collapsed bool) error {
+	target := strings.TrimSpace(path)
+	if target == "" {
+		return fmt.Errorf("%w: ruta vacía", ErrConfigFile)
+	}
+	if err := validateGitLayout(layout); err != nil {
+		return err
+	}
+	if listWidth < 0 {
+		return fmt.Errorf("%w: git_list_width no puede ser negativo", ErrConfigFormat)
+	}
+
+	cfg, _, err := loadFile(target, false)
+	if err != nil {
+		return err
+	}
+
+	cfg.GitLayout = strings.TrimSpace(layout)
+	cfg.GitListWidth = listWidth
+	cfg.GitListCollapsed = collapsed
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrConfigFormat, target, err)
+	}
+
+	dir := filepath.Dir(target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("%w: no se pudo crear %s: %w", ErrConfigFile, dir, err)
+	}
+
+	return writeFileAtomic(target, string(data)+"\n", true)
+}
+
 // writeFileAtomic writes data through a temporary file in the target directory:
 // the rename is atomic, so readers never see a half-written file.
 func writeFileAtomic(path, data string, replace bool) error {
@@ -139,10 +177,13 @@ func writeFileAtomic(path, data string, replace bool) error {
 // The layout fields are always serialized, while an empty theme or set of keys
 // is omitted.
 type fileConfig struct {
-	Theme         string             `json:"theme,omitempty"`
-	TreeWidth     int                `json:"tree_width"`
-	TreeCollapsed bool               `json:"tree_collapsed"`
-	Keys          map[string]KeyList `json:"keys,omitempty"`
+	Theme            string             `json:"theme,omitempty"`
+	TreeWidth        int                `json:"tree_width"`
+	TreeCollapsed    bool               `json:"tree_collapsed"`
+	GitLayout        string             `json:"git_layout,omitempty"`
+	GitListWidth     int                `json:"git_list_width"`
+	GitListCollapsed bool               `json:"git_list_collapsed"`
+	Keys             map[string]KeyList `json:"keys,omitempty"`
 }
 
 // KeyList is an action's binding: a string or a list of strings.

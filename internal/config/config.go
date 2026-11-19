@@ -20,22 +20,25 @@ import (
 // and exit; InitConfig writes a template and PrintConfig dumps the resolved
 // values, so no repo, editor or Docker validation runs for them.
 type Config struct {
-	ShowVersion   bool
-	ListThemes    bool
-	ListKeys      bool
-	InitConfig    bool
-	Force         bool
-	PrintConfig   bool
-	Repo          string
-	Editor        string
-	DockerHost    string
-	DebugLog      string
-	ConfigPath    string
-	Theme         string
-	Keys          map[string][]string
-	TreeWidth     int
-	TreeCollapsed bool
-	SavePath      string
+	ShowVersion      bool
+	ListThemes       bool
+	ListKeys         bool
+	InitConfig       bool
+	Force            bool
+	PrintConfig      bool
+	Repo             string
+	Editor           string
+	DockerHost       string
+	DebugLog         string
+	ConfigPath       string
+	Theme            string
+	Keys             map[string][]string
+	TreeWidth        int
+	TreeCollapsed    bool
+	GitLayout        string
+	GitListWidth     int
+	GitListCollapsed bool
+	SavePath         string
 }
 
 // Usage is the help text shown when -h or --help is requested.
@@ -181,6 +184,12 @@ func loadConfig(configPath, theme string) (Config, error) {
 	if fileCfg.TreeWidth < 0 {
 		return Config{}, fmt.Errorf("%w: tree_width no puede ser negativo", ErrConfigFormat)
 	}
+	if err := validateGitLayout(fileCfg.GitLayout); err != nil {
+		return Config{}, err
+	}
+	if fileCfg.GitListWidth < 0 {
+		return Config{}, fmt.Errorf("%w: git_list_width no puede ser negativo", ErrConfigFormat)
+	}
 
 	effectiveTheme := strings.TrimSpace(theme)
 	if effectiveTheme == "" {
@@ -188,10 +197,13 @@ func loadConfig(configPath, theme string) (Config, error) {
 	}
 
 	cfg := Config{
-		Theme:         effectiveTheme,
-		Keys:          fileCfg.keyOverrides(),
-		TreeWidth:     fileCfg.TreeWidth,
-		TreeCollapsed: fileCfg.TreeCollapsed,
+		Theme:            effectiveTheme,
+		Keys:             fileCfg.keyOverrides(),
+		TreeWidth:        fileCfg.TreeWidth,
+		TreeCollapsed:    fileCfg.TreeCollapsed,
+		GitLayout:        fileCfg.GitLayout,
+		GitListWidth:     fileCfg.GitListWidth,
+		GitListCollapsed: fileCfg.GitListCollapsed,
 	}
 	if loaded {
 		cfg.ConfigPath = path
@@ -201,6 +213,16 @@ func loadConfig(configPath, theme string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// validateGitLayout accepts the empty default plus the two persisted names.
+func validateGitLayout(layout string) error {
+	switch strings.TrimSpace(layout) {
+	case "", "split", "single":
+		return nil
+	default:
+		return fmt.Errorf("%w: git_layout %q no es válido; usa \"split\" o \"single\"", ErrConfigFormat, layout)
+	}
 }
 
 // resolveInitPath returns the destination of --init-config. Unlike loadConfig it

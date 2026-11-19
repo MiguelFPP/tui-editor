@@ -24,7 +24,7 @@ var expectedActions = []Action{
 	ActionGitStage, ActionGitUnstage, ActionGitCommit, ActionGitNewBranch, ActionGitDeleteBranch, ActionGitMerge,
 	ActionGitStash, ActionGitResolve, ActionGitResolveTheirs, ActionGitAbortMerge, ActionGitFetch, ActionGitPull,
 	ActionGitPush, ActionGitHunkPrev, ActionGitHunkNext, ActionGitHunkToggle, ActionGitRefresh, ActionGitHelp,
-	ActionGitBack,
+	ActionGitBack, ActionGitLayoutToggle, ActionGitWidthShrink, ActionGitWidthGrow, ActionGitToggleList,
 
 	ActionGitCommitSave, ActionGitCommitCancel,
 
@@ -447,6 +447,25 @@ func TestBindingsFilterInCatalogOrderAndCopy(t *testing.T) {
 	}
 }
 
+func TestGitLayoutToggleIsConfigurable(t *testing.T) {
+	registry := Default()
+
+	if got := registry.Keys(ActionGitLayoutToggle); !slices.Equal(got, []string{"L"}) {
+		t.Errorf("Keys(git_layout_toggle) = %v, want [L]", got)
+	}
+
+	custom, err := registry.Apply(map[string][]string{"git_layout_toggle": {"g"}})
+	if err != nil {
+		t.Fatalf("Apply() error = %v, want nil", err)
+	}
+	if got := custom.Label(ActionGitLayoutToggle); got != "g" {
+		t.Errorf("Label(git_layout_toggle) = %q, want g", got)
+	}
+	if action, ok := custom.Match(ScopeGit, "g"); !ok || action != ActionGitLayoutToggle {
+		t.Errorf("Match(git, g) = %q, %v, want git_layout_toggle", action, ok)
+	}
+}
+
 func TestAllAndConfigurableReturnCopiesAndCounts(t *testing.T) {
 	registry := Default()
 
@@ -467,8 +486,8 @@ func TestAllAndConfigurableReturnCopiesAndCounts(t *testing.T) {
 	}
 
 	configurable := registry.Configurable()
-	if len(configurable) != 63 {
-		t.Errorf("Configurable() = %d bindings, want 63", len(configurable))
+	if len(configurable) != 67 {
+		t.Errorf("Configurable() = %d bindings, want 67", len(configurable))
 	}
 	for _, binding := range configurable {
 		if !binding.Configurable {

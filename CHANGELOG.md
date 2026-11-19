@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `Git` panel shows the change list and the diff preview side by side in
+  `Cambios` and `Diff` when the panel is at least 100 cells wide; below that it
+  falls back to one column without losing content.
+- `L` toggles between one and two columns. `git_layout` (`split` / `single`)
+  persists the choice in `config.json`, preserving the theme, the key overrides
+  and the tree layout of the file.
+- Click and wheel act on the column under the pointer: the list moves its cursor
+  and the preview moves the hunk cursor without changing the selected file.
+- The diff body is highlighted with the Chroma lexer of the file, keeping the
+  gutter and the `+`/`-` markers; a file without a lexer stays plain.
+- `--print-config` and `--init-config` include `git_layout`.
+
+### Extended
+
+- Each Git column is drawn in its own rounded frame, with a header that names it
+  and counts its rows.
+- The shared border between the columns is draggable with the mouse, and
+  `shift+left` / `shift+right` move it two cells per press. The chosen width is
+  persisted in `git_list_width` (`0` = automatic, 40 %).
+- `H` collapses the change list: the diff takes the whole width and the list
+  keeps its cursor and offset. The state is persisted in `git_list_collapsed`.
+- Wide previews render the diff side by side: old lines on the left, new lines on
+  the right, numbered on both sides and highlighted per column. Below 52 cells of
+  preview the unified render is kept.
+- `git_layout`, `git_list_width` and `git_list_collapsed` are written together,
+  preserving the rest of the file, and `--print-config` reports all three.
+
+### Changed
+
+- Syntax highlighting moved to `internal/tui/common` so the editor and the Git
+  panel share the lexer cache.
+
 ## [0.6.0] - 2026-11-19
 
 Resizable and collapsible file tree.
