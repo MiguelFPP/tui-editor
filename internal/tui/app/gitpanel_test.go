@@ -116,13 +116,14 @@ func TestGitPanelClickSelectsTheRowUnderTheCursor(t *testing.T) {
 	m = drain(t, m, m.Init())
 	m = update(t, m, typed('2'))
 
-	top := gitBodyTop(m)
-	m = update(t, m, click(5, top))
+	// Each column draws its own frame: the row rectangles start inside the list bounds.
+	list := m.git.ListBounds()
+	m = update(t, m, click(list.Min.X+1, list.Min.Y))
 	if m.Focus() != FocusGit {
 		t.Fatalf("Focus() = %v, want git", m.Focus())
 	}
 
-	m = update(t, m, click(5, top+1))
+	m = update(t, m, click(list.Min.X+1, list.Min.Y+1))
 
 	model, cmd := press(t, m, typed('s'))
 	model = drain(t, model, cmd)
@@ -142,7 +143,9 @@ func TestGitPanelClickPicksTheHunkUnderTheCursor(t *testing.T) {
 		return twoHunkDiff(req.Path), nil
 	}
 
-	m := newSized(t, deps, 120, 40)
+	// Below the split threshold the list and the diff share one column, so a click on a row maps
+	// directly to the hunk under it.
+	m := newSized(t, deps, 99, 40)
 	m = drain(t, m, m.Init())
 	m = update(t, m, typed('2'))
 

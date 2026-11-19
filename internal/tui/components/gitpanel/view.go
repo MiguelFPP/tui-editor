@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
@@ -163,22 +165,34 @@ func (m Model) tabs() string {
 	return strings.Join(rendered, tabSeparator)
 }
 
-// body renders the visible window of the active section.
+// body renders the visible window of the active section, in two columns when the layout splits.
 func (m Model) body() []string {
 	height := m.bodyHeight()
-	rows := m.active()
+
+	// A failure of the panel or of the active section replaces the whole body, split included.
+	if state, ok := m.failureLine(); ok {
+		return pad([]string{state}, height)
+	}
+
+	if m.split {
+		return m.splitBody(height)
+	}
 
 	if state, ok := m.stateLine(); ok {
 		return pad([]string{state}, height)
 	}
 
+	rows := m.collapsedRows()
 	start := m.offsets[m.section]
+	if m.listCollapsed {
+		start = m.scrollPreview
+	}
 	end := min(start+height, len(rows))
 
 	window := make([]string, 0, height)
 	for i := start; i < end; i++ {
 		line := truncate(rows[i], m.width)
-		if i == m.cursors[m.section] {
+		if i == m.cursorRow() {
 			line = styles.CursorPlain.Render(line)
 		}
 
@@ -188,13 +202,272 @@ func (m Model) body() []string {
 	return pad(window, height)
 }
 
-// stateLine is the message that replaces the rows while loading or when there is nothing to show.
-func (m Model) stateLine() (string, bool) {
+// splitBody composes the list on the left and the diff preview on the right, each one framed.
+// Every column keeps its own placeholder, so an empty diff never hides the file list.
+func (m Model) splitBody(height int) []string {
+	listW, previewW := m.listColumns()
+	innerH := max(innerCells(height), 0)
+
+	left := frameColumn(m.listPane(innerCells(listW), max(innerH-listHeaderRows, 0)), listW, height)
+	right := frameColumn(m.previewPane(innerCells(previewW), innerH), previewW, height)
+
+	out := make([]string, 0, height)
+	for row := 0; row < height; row++ {
+		out = append(out, left[row]+right[row])
+	}
+
+	if m.dragging {
+		out = m.paintSplitter(out)
+	}
+
+	return out
+}
+
+// paintSplitter redraws the shared border with the accent colour while it is dragged.
+func (m Model) paintSplitter(rows []string) []string {
+	edge := m.splitterRect.Min.X - m.bounds.Min.X
+	handle := styles.BorderFocused.Render("│")
+
+	for row := 1; row < len(rows)-1; row++ {
+		line := rows[row]
+		if visibleCells(line) <= edge {
+			continue
+		}
+
+		rows[row] = clipCells(line, edge) + handle + tailCells(line, edge+1)
+	}
+
+	return rows
+}
+
+// visibleCells counts the printable cells of a styled line.
+func visibleCells(line string) int {
+	count := 0
+	inEscape := false
+
+	for _, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+		case inEscape:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		default:
+			count++
+		}
+	}
+
+	return count
+}
+
+// clipCells cuts a styled line to width visible cells, keeping the escapes.
+func clipCells(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	var out strings.Builder
+	visible := 0
+	inEscape := false
+
+	for _, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+			out.WriteRune(r)
+		case inEscape:
+			out.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case visible >= width:
+			return out.String()
+		default:
+			out.WriteRune(r)
+			visible++
+		}
+	}
+
+	return out.String()
+}
+
+// tailCells returns a styled line from its n-th visible cell, keeping that cell's escapes.
+func tailCells(line string, cells int) string {
+	if cells <= 0 {
+		return line
+	}
+
+	var pending strings.Builder
+	visible := 0
+	inEscape := false
+
+	for i, r := range line {
+		switch {
+		case r == 0x1b:
+			inEscape = true
+			pending.WriteRune(r)
+		case inEscape:
+			pending.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+		case visible == cells:
+			return pending.String() + line[i:]
+		default:
+			visible++
+			pending.Reset()
+		}
+	}
+
+	return ""
+}
+
+// listPane renders the left column: its fixed header plus the scrollable rows.
+func (m Model) listPane(width, height int) []string {
+	lines := make([]string, 0, height+listHeaderRows)
+	lines = append(lines, padCells(styles.TitlePlain.Render(m.listHeader()), width))
+
+	return append(lines, m.column(m.listPlaceholder(), m.scrollList, m.cursors[Changes], width, height)...)
+}
+
+// previewPane renders the right column; its first row names the diff and scrolls with it.
+func (m Model) previewPane(width, height int) []string {
+	return m.column(m.previewPlaceholder(), m.scrollPreview, m.hunkCursorRow(), width, height)
+}
+
+// listHeader names the left column and counts its rows.
+func (m Model) listHeader() string {
+	return "Cambios · " + strconv.Itoa(len(m.listRows()))
+}
+
+// frameColumn draws a rounded frame around content, exactly width by height cells.
+func frameColumn(content []string, width, height int) []string {
+	if width <= 2*frameSide || height <= 2*frameSide {
+		return fitRows(content, width, height)
+	}
+
+	lines := fitRows(content, innerCells(width), innerCells(height))
+	box := styles.Border.Render(strings.Join(lines, "\n"))
+
+	return strings.Split(box, "\n")
+}
+
+// fitRows clips every row to width cells and pads the slice to exactly height rows.
+func fitRows(rows []string, width, height int) []string {
+	out := make([]string, 0, max(height, 0))
+	for row := 0; row < height; row++ {
+		line := ""
+		if row < len(rows) {
+			line = rows[row]
+		}
+
+		out = append(out, padCells(line, width))
+	}
+
+	return out
+}
+
+// listPlaceholder returns the left rows, or the message of an empty or loading section.
+func (m Model) listPlaceholder() []string {
+	if rows := m.listRows(); len(rows) > 0 {
+		return rows
+	}
+
+	switch m.section {
+	case Changes:
+		if m.loading.status {
+			return []string{styles.MetaPlain.Render("cargando…")}
+		}
+		if m.status.Unborn {
+			return []string{styles.MetaPlain.Render("sin commits todavía")}
+		}
+
+		return []string{styles.MetaPlain.Render("sin cambios")}
+	default:
+		return []string{styles.MetaPlain.Render("cargando…")}
+	}
+}
+
+// previewPlaceholder returns the right rows, or the message shown before a diff is loaded.
+func (m Model) previewPlaceholder() []string {
+	if rows := m.previewRows(); len(rows) > 0 {
+		return rows
+	}
+
+	return []string{styles.MetaPlain.Render("sin diff · enter en Cambios para cargarlo")}
+}
+
+// column renders one column of the split body: truncate, highlight the cursor row and pad.
+func (m Model) column(rows []string, offset, cursor, width, height int) []string {
+	out := make([]string, 0, height)
+	for row := 0; row < height; row++ {
+		index := offset + row
+
+		line := ""
+		if index >= 0 && index < len(rows) {
+			line = truncate(rows[index], width)
+			if index == cursor {
+				line = styles.CursorPlain.Render(line)
+			}
+		}
+
+		out = append(out, padCells(line, width))
+	}
+
+	return out
+}
+
+// cursorRow is the highlighted row of the single column: the hunk cursor of a collapsed preview,
+// or the cursor of the active section.
+func (m Model) cursorRow() int {
+	if m.listCollapsed && (m.section == Diff || m.loaded) {
+		return m.hunkCursorRow()
+	}
+
+	return m.cursors[m.section]
+}
+
+// hunkCursorRow is the row of the preview that starts the hunk under the cursor; the section header
+// occupies the first row.
+func (m Model) hunkCursorRow() int {
+	if m.hunkCursor < 0 || m.hunkCursor >= len(m.hunkRows) {
+		return -1
+	}
+
+	return m.hunkRows[m.hunkCursor].start
+}
+
+// padCells clips line to width cells and fills the rest with spaces.
+func padCells(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	line = truncate(line, width)
+	if gap := width - lipgloss.Width(line); gap > 0 {
+		return line + strings.Repeat(" ", gap)
+	}
+
+	return line
+}
+
+// failureLine is the failure of the panel or of the active section; it replaces the whole body.
+func (m Model) failureLine() (string, bool) {
 	if m.writeErr != nil {
 		return styles.FailPlain.Render(truncate("error al escribir: "+describeError(m.writeErr), m.width)), true
 	}
 	if err := m.sectionError(m.section); err != nil {
 		return styles.FailPlain.Render(truncate("error: "+describeError(err), m.width)), true
+	}
+
+	return "", false
+}
+
+// stateLine is the message that replaces the rows while loading or when there is nothing to show.
+func (m Model) stateLine() (string, bool) {
+	if state, ok := m.failureLine(); ok {
+		return state, true
 	}
 	if m.sectionLoading(m.section) && len(m.active()) == 0 {
 		return styles.MetaPlain.Render("cargando…"), true
@@ -239,6 +512,13 @@ func (m Model) footerText() string {
 		m.keys.Label(keymap.ActionGitSectionNext)+": sección",
 		m.keys.Label(keymap.ActionGitUp)+"/"+m.keys.Label(keymap.ActionGitDown)+": mover",
 	)
+
+	if m.section == Changes || m.section == Diff {
+		parts = append(parts,
+			m.keys.Label(keymap.ActionGitLayoutToggle)+": columnas",
+			m.keys.Label(keymap.ActionGitToggleList)+": lista",
+		)
+	}
 
 	switch m.section {
 	case Changes:
@@ -325,6 +605,12 @@ func (m Model) helpLines() []string {
 			"mover el cursor; la rueda desplaza la lista"),
 		helpRow(m.keys.Label(keymap.ActionGitRefresh),
 			"refrescar estado, ramas, stash e historial"),
+		helpRow(m.keys.Label(keymap.ActionGitLayoutToggle),
+			"alternar una o dos columnas en Cambios y Diff"),
+		helpRow(m.keys.Label(keymap.ActionGitWidthShrink)+" / "+m.keys.Label(keymap.ActionGitWidthGrow),
+			"reducir o ampliar la lista (también arrastrando el borde)"),
+		helpRow(m.keys.Label(keymap.ActionGitToggleList),
+			"minimizar la lista y dejar el diff a todo el ancho"),
 		helpRow(m.keys.Label(keymap.ActionGitFetch)+" / "+m.keys.Label(keymap.ActionGitPull)+" / "+m.keys.Label(keymap.ActionGitPush),
 			"fetch, pull y push"),
 		helpRow(m.keys.Label(keymap.ActionGitBack),

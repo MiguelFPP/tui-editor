@@ -577,6 +577,29 @@ func TestParseConfigTreeLayout(t *testing.T) {
 	}
 }
 
+func TestParseConfigGitLayout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"git_layout":"single"}`)
+
+	cfg, err := Parse([]string{"--config", path}, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.GitLayout != "single" {
+		t.Errorf("GitLayout = %q, want %q", cfg.GitLayout, "single")
+	}
+}
+
+func TestParseConfigGitLayoutRejectsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"git_layout":"triple"}`)
+
+	_, err := Parse([]string{"--config", path}, noEnv)
+	if !errors.Is(err, ErrConfigFormat) {
+		t.Fatalf("Parse() error = %v, want %v", err, ErrConfigFormat)
+	}
+}
+
 func TestParseSavePathWithoutFile(t *testing.T) {
 	dir := withDefaultConfigDir(t)
 	want := filepath.Join(dir, "tui-editor", "config.json")
@@ -993,6 +1016,60 @@ func TestSaveLayoutCreatesFile(t *testing.T) {
 	}
 	if cfg.TreeWidth != 42 || !cfg.TreeCollapsed {
 		t.Errorf("Parse() = %+v, want tree_width 42 and collapsed", cfg)
+	}
+}
+
+func TestSaveGitLayoutPreservesEveryOtherField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"theme":"dracula","tree_width":10,"tree_collapsed":true,"keys":{"quit":["q","c"]}}`)
+
+	if err := SaveGitLayout(path, "single", 50, true); err != nil {
+		t.Fatalf("SaveGitLayout() error = %v, want nil", err)
+	}
+
+	cfg, err := Parse([]string{"--config", path}, noEnv)
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if cfg.GitLayout != "single" {
+		t.Errorf("GitLayout = %q, want %q", cfg.GitLayout, "single")
+	}
+	if cfg.GitListWidth != 50 {
+		t.Errorf("GitListWidth = %d, want 50", cfg.GitListWidth)
+	}
+	if !cfg.GitListCollapsed {
+		t.Error("GitListCollapsed = false, want true")
+	}
+	if cfg.Theme != "dracula" || cfg.TreeWidth != 10 || !cfg.TreeCollapsed {
+		t.Errorf("Parse() = %+v, want the rest of the file preserved", cfg)
+	}
+	if !slices.Equal(cfg.Keys["quit"], []string{"q", "c"}) {
+		t.Errorf("Keys[quit] = %v, want [q c]", cfg.Keys["quit"])
+	}
+}
+
+func TestSaveGitLayoutRejectsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+
+	if err := SaveGitLayout(path, "triple", 0, false); !errors.Is(err, ErrConfigFormat) {
+		t.Fatalf("SaveGitLayout() error = %v, want %v", err, ErrConfigFormat)
+	}
+}
+
+func TestSaveGitLayoutDoesNotOverwriteAnInvalidFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfigFile(t, path, `{"theme": 42}`)
+
+	if err := SaveGitLayout(path, "single", 40, false); err == nil {
+		t.Fatal("SaveGitLayout() error = nil, want an invalid file error")
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	if string(body) != `{"theme": 42}` {
+		t.Errorf("archivo = %q, want the original content", body)
 	}
 }
 

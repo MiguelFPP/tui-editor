@@ -320,7 +320,9 @@ func TestClicksOnTheInnerEdgeSelectTheRowUnderTheCursor(t *testing.T) {
 		m = drain(t, m, m.Init())
 		m = update(t, m, typed('2'))
 
-		m = update(t, m, click(m.gitRect.Min.X, gitBodyTop(m)+1))
+		// The first clickable row of the framed list.
+		list := m.git.ListBounds()
+		m = update(t, m, click(list.Min.X, list.Min.Y+1))
 
 		model, cmd := press(t, m, typed('s'))
 		model = drain(t, model, cmd)
@@ -377,7 +379,9 @@ func TestClicksOnTheFrameNeverChangeTheSelection(t *testing.T) {
 		m = drain(t, m, m.Init())
 		m = update(t, m, typed('2'))
 
-		m = update(t, m, click(m.gitRect.Min.X, gitBodyTop(m)+1))          // long.txt
+		// The column frames are chrome: rows start inside the list bounds.
+		list := m.git.ListBounds()
+		m = update(t, m, click(list.Min.X+1, list.Min.Y+1))                // long.txt
 		m = update(t, m, click(m.gitRect.Min.X-borderSide, gitBodyTop(m))) // the left frame
 
 		model, cmd := press(t, m, typed('s'))

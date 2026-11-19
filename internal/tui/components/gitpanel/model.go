@@ -68,6 +68,21 @@ const (
 
 	// maxErrorCells bounds the line the panel shows for a failure it does not recognise.
 	maxErrorCells = 160
+
+	// gitSplitMinWidth is the panel width below which the list and the preview share one column.
+	gitSplitMinWidth = 100
+	minGitList       = 28
+	minGitPreview    = 34
+	listPercent      = 40
+
+	// frameSide is the chrome one column frame spends on each side.
+	frameSide = 1
+	// listHeaderRows is the fixed header of the left column.
+	listHeaderRows = 1
+	// widthStep is the cells one keyboard resize moves the shared border.
+	widthStep = 2
+	// minSplitDiffWidth is the preview width below which the diff stays unified.
+	minSplitDiffWidth = 52
 )
 
 // Section is one navigable block of the panel.
@@ -91,6 +106,36 @@ func (s Section) String() string {
 	}
 
 	return sectionLabels[s]
+}
+
+// Layout is the preferred shape of the Changes and Diff sections.
+type Layout uint8
+
+const (
+	LayoutSplit Layout = iota
+	LayoutSingle
+)
+
+func (l Layout) String() string {
+	if l == LayoutSingle {
+		return "single"
+	}
+
+	return "split"
+}
+
+// ParseLayout reads the persisted preference; an empty or unknown value keeps split.
+func ParseLayout(raw string) Layout {
+	if strings.EqualFold(strings.TrimSpace(raw), "single") {
+		return LayoutSingle
+	}
+
+	return LayoutSplit
+}
+
+// LayoutSavedMsg reports the result of persisting the layout preference.
+type LayoutSavedMsg struct {
+	Err error
 }
 
 // statusLoadedMsg carries one refresh of the working tree.
@@ -187,6 +232,35 @@ type Model struct {
 	tabRects [sectionCount]image.Rectangle
 	hunkRows []rowSpan
 
+	// Layout of the Changes and Diff sections: the persisted preference, the mode in force, the
+	// inner rectangles of both columns and the draggable border between them.
+	layout       Layout
+	split        bool
+	listW        int
+	previewW     int
+	listRect     image.Rectangle
+	previewRect  image.Rectangle
+	splitterRect image.Rectangle
+
+	// listWidth is the explicit width of the left column; zero means the automatic ratio;
+	// listCollapsed hides the list and hands the whole width to the preview.
+	listWidth     int
+	listCollapsed bool
+	dragging      bool
+	dragDirty     bool
+
+	// scrollList and scrollPreview are the independent offsets of the two columns.
+	scrollList    int
+	scrollPreview int
+
+	// highlighted is the cached, coloured preview body; key tells which diff and width it belongs to.
+	highlighted  []string
+	highlightKey string
+
+	// saveLayout persists the layout preference, the width and the collapsed state; nil means the
+	// panel does not persist anything.
+	saveLayout func(Layout, int, bool) error
+
 	help bool
 }
 
@@ -267,18 +341,35 @@ type seqState struct {
 // New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
 // falls back to the built-in defaults.
 func New(git ports.GitService, keys keymap.Registry) Model {
+	return NewWithOptions(git, keys, Options{})
+}
+
+// Options configures the panel at construction.
+type Options struct {
+	Layout        Layout
+	ListWidth     int
+	ListCollapsed bool
+	SaveLayout    func(Layout, int, bool) error
+}
+
+// NewWithOptions builds the panel with the persisted layout and the save seam.
+func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Model {
 	if len(keys.All()) == 0 {
 		keys = keymap.Default()
 	}
 
 	m := Model{
-		git:     git,
-		keys:    keys,
-		loading: loadingState{status: true, branches: true},
-		seqs:    seqState{status: 1, branches: 1},
-		marked:  make(map[int]bool),
-		commit:  newCommitModal(defaultWidth, defaultHeight),
-		prompt:  newPromptModal(promptNone, defaultWidth),
+		git:           git,
+		keys:          keys,
+		layout:        opts.Layout,
+		listWidth:     max(opts.ListWidth, 0),
+		listCollapsed: opts.ListCollapsed,
+		saveLayout:    opts.SaveLayout,
+		loading:       loadingState{status: true, branches: true},
+		seqs:          seqState{status: 1, branches: 1},
+		marked:        make(map[int]bool),
+		commit:        newCommitModal(defaultWidth, defaultHeight),
+		prompt:        newPromptModal(promptNone, defaultWidth),
 	}
 	m.SetSize(defaultWidth, defaultHeight)
 
@@ -408,17 +499,325 @@ func (m *Model) SetBounds(x, y, width, height int) {
 	m.sync()
 }
 
-// sync rebuilds the cached diff body and the hit-test rectangles; View only composes them.
+// sync rebuilds the cached diff body, the column geometry and the hit-test rectangles; View only
+// composes them.
 func (m *Model) sync() {
+	// The geometry decides the preview width, so it is computed before the diff is rendered.
+	m.split = m.splitNow()
+	m.listW, m.previewW = m.splitWidths(m.width)
+
 	if !m.loaded {
 		m.diffBody, m.diffLines, m.hunkRows = "", nil, nil
+		m.highlighted, m.highlightKey = nil, ""
 	} else {
-		m.diffBody = common.RenderDiff(m.diff, m.width, true)
+		m.diffBody = m.renderPreview()
 		m.diffLines = strings.Split(m.diffBody, "\n")
-		m.hunkRows = diffSpans(m.diff)
+		m.hunkRows = m.previewSpans()
+		m.highlighted, m.highlightKey = m.highlightedPreview(), m.highlightKeyFor()
 	}
 
+	m.markColumns()
+
+	// Both column offsets survive a resize, clamped to the rows they now have.
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()), m.listViewportHeight())
+	m.scrollPreview = m.clampOffset(m.scrollPreview, len(m.collapsedRows()), m.previewViewportHeight())
+
 	m.clamp(m.section)
+}
+
+// previewWidth is the cells the diff preview has, its frame excluded.
+func (m Model) previewWidth() int {
+	if !m.split {
+		return m.width
+	}
+
+	return innerCells(m.previewW)
+}
+
+// splitDiffWanted reports whether the preview is wide enough for the aligned diff. It only applies
+// to the two-column layout: a single column keeps the unified render.
+func (m Model) splitDiffWanted() bool {
+	return m.split && m.previewWidth() >= minSplitDiffWidth
+}
+
+// renderPreview draws the diff with the widest layout the preview can hold.
+func (m Model) renderPreview() string {
+	if m.splitDiffWanted() {
+		return common.RenderDiffSplit(m.diff, m.previewWidth(), true)
+	}
+
+	return common.RenderDiff(m.diff, m.previewWidth(), true)
+}
+
+// previewSpans locates every hunk inside the rendered preview, so the hunk cursor and the clicks
+// follow the layout that was actually drawn.
+func (m Model) previewSpans() []rowSpan {
+	if m.splitDiffWanted() {
+		return alignedSpans(m.diff)
+	}
+
+	return diffSpans(m.diff)
+}
+
+// alignedSpans is diffSpans for the side-by-side layout: each hunk is its title plus its aligned
+// rows, which can differ from the number of raw lines.
+func alignedSpans(diff domain.Diff) []rowSpan {
+	if diff.IsEmpty() || diff.Binary {
+		return nil
+	}
+
+	spans := make([]rowSpan, 0, len(diff.Hunks))
+	row := 1 // the first row of the section names the diff
+
+	for _, hunk := range domain.AlignDiff(diff) {
+		rows := len(hunk.Rows) + 1
+		spans = append(spans, rowSpan{start: row, end: row + rows})
+		row += rows
+	}
+
+	return spans
+}
+
+// highlightKeyFor identifies the cached preview: the path, the mode, the layout and the width decide
+// the lexer and the row count.
+func (m Model) highlightKeyFor() string {
+	return fmt.Sprintf("%s|%t|%t|%d", m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth())
+}
+
+// highlightedPreview colours the body of the diff once per key; a repeated render reuses it. The
+// aligned layout already carries its colours per side, so only the unified body is re-highlighted.
+func (m *Model) highlightedPreview() []string {
+	key := m.highlightKeyFor()
+	if m.highlightKey == key && len(m.highlighted) == len(m.diffLines) {
+		return m.highlighted
+	}
+	if m.splitDiffWanted() {
+		return m.diffLines
+	}
+
+	return common.HighlightDiffLines(m.request.Path, m.diffLines)
+}
+
+// splitNow reports whether the active section shows the list and the preview side by side.
+func (m Model) splitNow() bool {
+	if m.layout == LayoutSingle || m.listCollapsed || m.width < gitSplitMinWidth {
+		return false
+	}
+
+	return m.section == Changes || m.section == Diff
+}
+
+// innerCells returns the cells left by a frame of the given size, never negative.
+func innerCells(size int) int {
+	return max(size-2*frameSide, 0)
+}
+
+// previewSection reports whether the right column has content to draw.
+func (m Model) previewSection() bool {
+	return m.section == Diff || m.loaded
+}
+
+// listRows returns the rows of the left column: the changes, or the active section when the
+// preview is not shown.
+func (m Model) listRows() []string {
+	if m.section == Diff {
+		return m.changeRows()
+	}
+
+	return m.active()
+}
+
+// collapsedRows returns the preview rows of a collapsed list, so hiding the list never hides the
+// diff: the whole body shows it.
+func (m Model) collapsedRows() []string {
+	if !m.listCollapsed {
+		return m.active()
+	}
+
+	if m.section == Changes && !m.loaded {
+		return m.changeRows() // nothing to preview yet: keep the list visible
+	}
+
+	return m.diffRows()
+}
+
+// previewRows returns the rows of the right column, already formatted.
+func (m Model) previewRows() []string {
+	return m.diffRows()
+}
+
+// listColumns reports the width of each column; the preview gets nothing outside split mode.
+func (m Model) listColumns() (int, int) {
+	if !m.split {
+		return m.width, 0
+	}
+
+	return m.listW, m.previewW
+}
+
+// scrollListBy and scrollPreviewBy move one column's offset without touching the other.
+func (m *Model) scrollListBy(delta int) {
+	m.scrollList = m.clampOffset(m.scrollList+delta, len(m.listRows()), m.listViewportHeight())
+}
+
+func (m *Model) scrollPreviewBy(delta int) {
+	m.scrollPreview = m.clampOffset(m.scrollPreview+delta, len(m.previewRows()), m.previewViewportHeight())
+}
+
+// clampOffset keeps one column offset inside its rows for the given viewport height.
+func (m Model) clampOffset(offset, rows, height int) int {
+	return min(max(offset, 0), max(rows-height, 0))
+}
+
+// scrollListToCursor moves the list offset so the Changes cursor stays visible.
+func (m *Model) scrollListToCursor() {
+	height := m.listViewportHeight()
+	if height <= 0 {
+		return
+	}
+
+	cursor := m.cursors[Changes]
+	if cursor < m.scrollList {
+		m.scrollList = cursor
+	}
+	if cursor >= m.scrollList+height {
+		m.scrollList = cursor - height + 1
+	}
+
+	m.scrollList = m.clampOffset(m.scrollList, len(m.listRows()), height)
+}
+
+// splitWidths divides the panel width between both columns; in single mode the list takes it all.
+func (m Model) splitWidths(panelW int) (int, int) {
+	if !m.split {
+		return max(panelW, 0), 0
+	}
+
+	reserve := m.listWidth
+	if reserve <= 0 {
+		reserve = panelW * listPercent / 100
+	}
+
+	high := max(panelW-minGitPreview, minGitList)
+	list := min(max(reserve, minGitList), high)
+
+	return list, max(panelW-list, 0)
+}
+
+// markColumns stores the inner rectangle of each column and of the border between them.
+func (m *Model) markColumns() {
+	m.listRect, m.previewRect, m.splitterRect = image.Rectangle{}, image.Rectangle{}, image.Rectangle{}
+	if m.width <= 0 {
+		return
+	}
+
+	top := m.bounds.Min.Y + headerRows
+	height := m.bodyHeight()
+	if height <= 0 {
+		return
+	}
+
+	if !m.split {
+		m.listRect = image.Rect(m.bounds.Min.X, top, m.bounds.Min.X+m.width, top+height)
+
+		return
+	}
+
+	// The shared border of both frames is the drag handle; its cells are not clickable rows.
+	edge := m.bounds.Min.X + m.listW
+	m.splitterRect = image.Rect(edge-frameSide, top, edge+frameSide, top+height)
+
+	// The frames are chrome: the clickable area of each column starts one cell inside, and the
+	// left column skips its fixed header row.
+	listTop := top + frameSide + listHeaderRows
+	listHeight := max(innerCells(height)-listHeaderRows, 0)
+	m.listRect = image.Rect(m.bounds.Min.X+frameSide, listTop, edge-frameSide, listTop+listHeight)
+
+	previewHeight := max(innerCells(height), 0)
+	m.previewRect = image.Rect(edge+frameSide, top+frameSide, edge+m.previewW-frameSide, top+frameSide+previewHeight)
+}
+
+// ListBounds returns the clickable area of the left column, frames excluded.
+func (m Model) ListBounds() image.Rectangle {
+	return m.listRect
+}
+
+// PreviewBounds returns the clickable area of the right column, frames excluded.
+func (m Model) PreviewBounds() image.Rectangle {
+	return m.previewRect
+}
+
+// onSplitter reports whether the point falls on the draggable border between columns.
+func (m Model) onSplitter(point image.Point) bool {
+	return m.split && point.In(m.splitterRect)
+}
+
+// startDrag begins a resize of the shared border.
+func (m *Model) startDrag() {
+	m.dragging, m.dragDirty = true, false
+}
+
+// dragTo moves the border to column x, clamped to both column minimums.
+func (m *Model) dragTo(x int) {
+	if !m.dragging || !m.split {
+		return
+	}
+
+	next := m.clampListWidth(x - m.bounds.Min.X)
+	if next == m.listW {
+		return
+	}
+
+	m.listWidth = next
+	m.dragDirty = true
+	m.sync()
+}
+
+// cancelDrag drops a drag without persisting anything.
+func (m *Model) cancelDrag() {
+	m.dragging, m.dragDirty = false, false
+}
+
+// resizeList moves the border by delta cells and reports whether the layout changed.
+func (m *Model) resizeList(delta int) bool {
+	if !m.split {
+		return false
+	}
+
+	next := m.clampListWidth(m.listW + delta)
+	if next == m.listW {
+		return false
+	}
+
+	m.listWidth = next
+	m.sync()
+
+	return true
+}
+
+// clampListWidth keeps both columns above their minimums.
+func (m Model) clampListWidth(width int) int {
+	high := max(m.width-minGitPreview, minGitList)
+
+	return min(max(width, minGitList), high)
+}
+
+// listViewportHeight is the rows the left column can show, its header excluded.
+func (m Model) listViewportHeight() int {
+	if !m.split {
+		return m.bodyHeight()
+	}
+
+	return max(innerCells(m.bodyHeight())-listHeaderRows, 0)
+}
+
+// previewViewportHeight is the rows the right column can show inside its frame.
+func (m Model) previewViewportHeight() int {
+	if !m.split {
+		return m.bodyHeight()
+	}
+
+	return max(innerCells(m.bodyHeight()), 0)
 }
 
 // diffSpans locates every hunk inside the rows of the diff section, its title line included.
@@ -512,7 +911,12 @@ func (m Model) diffRows() []string {
 		header += " · " + hunk
 	}
 
-	return append([]string{header}, m.diffLines...)
+	body := m.diffLines
+	if len(m.highlighted) == len(m.diffLines) {
+		body = m.highlighted
+	}
+
+	return append([]string{header}, body...)
 }
 
 // hunkLabel describes the hunk cursor and the marks of the loaded diff.
@@ -628,8 +1032,13 @@ func (m *Model) markTabs() {
 	}
 }
 
-// rowAt maps terminal coordinates to the row index of the active section.
+// rowAt maps terminal coordinates to the row index of the active section. In split mode it only
+// answers for the list column: the preview has its own router.
 func (m Model) rowAt(point image.Point) (int, bool) {
+	if m.split {
+		return m.listRowAt(point)
+	}
+
 	for index, rect := range m.rowRects[m.section] {
 		if !point.In(rect) {
 			continue
@@ -644,6 +1053,34 @@ func (m Model) rowAt(point image.Point) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// listRowAt maps a point inside the left column to an index of its rows.
+func (m Model) listRowAt(point image.Point) (int, bool) {
+	if !point.In(m.listRect) {
+		return 0, false
+	}
+
+	row := m.scrollList + point.Y - m.listRect.Min.Y
+	if row < 0 || row >= len(m.listRows()) {
+		return 0, false
+	}
+
+	return row, true
+}
+
+// previewRowAt maps a point inside the right column to an index of the cached diff rows.
+func (m Model) previewRowAt(point image.Point) (int, bool) {
+	if !m.split || !point.In(m.previewRect) {
+		return 0, false
+	}
+
+	row := m.scrollPreview + point.Y - m.previewRect.Min.Y
+	if row < 0 || row >= len(m.previewRows()) {
+		return 0, false
+	}
+
+	return row, true
 }
 
 // tabAt maps terminal coordinates to one of the visible section tabs.

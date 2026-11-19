@@ -87,6 +87,10 @@ type Deps struct {
 
 	// SaveLayout persists the tree layout; nil means the layout is not persisted.
 	SaveLayout func(width int, collapsed bool) error
+
+	// SaveGitLayout persists the Git panel layout, the list width and its collapsed state; nil
+	// means it is not persisted.
+	SaveGitLayout func(layout string, listWidth int, listCollapsed bool) error
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -157,7 +161,7 @@ func New(deps Deps) Model {
 		editors:       deps.Editor,
 		keys:          keys,
 		tree:          filetree.New(deps.Files, "", keys),
-		git:           gitpanel.New(deps.Git, keys),
+		git:           gitpanel.NewWithOptions(deps.Git, keys, gitOptions(deps)),
 		docker:        dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
 		tab:           FilesTab,
 		width:         defaultWidth,
@@ -172,6 +176,24 @@ func New(deps Deps) Model {
 	m.resize()
 
 	return m
+}
+
+// gitOptions maps the persisted preference and the save seam onto the panel options.
+func gitOptions(deps Deps) gitpanel.Options {
+	opts := gitpanel.Options{
+		Layout:        gitpanel.ParseLayout(deps.Config.GitLayout),
+		ListWidth:     deps.Config.GitListWidth,
+		ListCollapsed: deps.Config.GitListCollapsed,
+	}
+	if deps.SaveGitLayout == nil {
+		return opts
+	}
+
+	opts.SaveLayout = func(layout gitpanel.Layout, width int, collapsed bool) error {
+		return deps.SaveGitLayout(layout.String(), width, collapsed)
+	}
+
+	return opts
 }
 
 // Init starts the tree, the Git panel and the spinner.
@@ -217,6 +239,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case layoutSavedMsg:
 		if msg.err != nil {
 			cmds = append(cmds, m.notify(msg.err.Error()))
+		}
+	case gitpanel.LayoutSavedMsg:
+		if msg.Err != nil {
+			cmds = append(cmds, m.notify(msg.Err.Error()))
 		}
 	case filetree.FileChosenMsg:
 		if m.editorDirty() {
@@ -378,11 +404,18 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case keymap.ActionTabDocker:
 		return m.setTab(DockerTab), false
 	case keymap.ActionToggleTree:
-		return m.toggleTree(), false
+		if m.tab == FilesTab {
+			return m.toggleTree(), false
+		}
 	case keymap.ActionTreeShrink:
-		return m.resizeTree(-treeStep), false
+		// Outside the Files tab these keys belong to the panel, which resizes its own columns.
+		if m.tab == FilesTab {
+			return m.resizeTree(-treeStep), false
+		}
 	case keymap.ActionTreeGrow:
-		return m.resizeTree(treeStep), false
+		if m.tab == FilesTab {
+			return m.resizeTree(treeStep), false
+		}
 	case keymap.ActionFocusNext, keymap.ActionFocusPrev:
 		// Outside the Files tab the key belongs to the panel, which uses it for its own sections.
 		if m.tab == FilesTab {
@@ -459,52 +492,67 @@ func (m *Model) handleClick(msg tea.MouseClickMsg) tea.Cmd {
 	return m.dispatchMouse(msg, panel)
 }
 
-// handleMotion resizes the tree while the border is dragged; the release persists it.
+// handleMotion resizes the tree while the border is dragged, or forwards the motion to the Git
+// panel, which owns its own splitter.
 func (m *Model) handleMotion(msg tea.MouseMotionMsg) tea.Cmd {
-	if !m.dragging {
+	if m.dragging {
+		// The handle only exists in the Files tab with the tree visible.
+		if m.tab != FilesTab || m.treeCollapsed {
+			m.cancelDrag()
+
+			return nil
+		}
+
+		width, _ := m.canvas()
+		next := clamp(msg.X+1, minTree, max(width-minEditorBox, minTree))
+		if next == m.treeWidthNow(width) {
+			return nil
+		}
+
+		m.treeWidth = next
+		m.dragDirty = true
+		m.resize()
+
 		return nil
 	}
 
-	// The handle only exists in the Files tab with the tree visible.
-	if m.tab != FilesTab || m.treeCollapsed {
-		m.cancelDrag()
+	if m.tab == GitTab {
+		next, cmd := m.git.Update(msg)
+		m.git = next
 
-		return nil
+		return cmd
 	}
-
-	width, _ := m.canvas()
-	next := clamp(msg.X+1, minTree, max(width-minEditorBox, minTree))
-	if next == m.treeWidthNow(width) {
-		return nil
-	}
-
-	m.treeWidth = next
-	m.dragDirty = true
-	m.resize()
 
 	return nil
 }
 
-// handleRelease ends the drag and persists the layout once, only when the border moved.
-func (m *Model) handleRelease(tea.MouseReleaseMsg) tea.Cmd {
-	if !m.dragging {
-		return nil
+// handleRelease ends the tree drag, or forwards the release to the Git panel.
+func (m *Model) handleRelease(msg tea.MouseReleaseMsg) tea.Cmd {
+	if m.dragging {
+		m.dragging = false
+		if !m.dragDirty {
+			return nil
+		}
+
+		m.dragDirty = false
+		save := m.saveLayout
+		if save == nil {
+			return nil
+		}
+
+		width, collapsed := m.treeWidth, m.treeCollapsed
+
+		return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
 	}
 
-	m.dragging = false
-	if !m.dragDirty {
-		return nil
+	if m.tab == GitTab {
+		next, cmd := m.git.Update(msg)
+		m.git = next
+
+		return cmd
 	}
 
-	m.dragDirty = false
-	save := m.saveLayout
-	if save == nil {
-		return nil
-	}
-
-	width, collapsed := m.treeWidth, m.treeCollapsed
-
-	return func() tea.Msg { return layoutSavedMsg{err: save(width, collapsed)} }
+	return nil
 }
 
 // cancelDrag drops a drag without persisting anything.

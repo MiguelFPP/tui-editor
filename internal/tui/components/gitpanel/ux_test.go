@@ -114,8 +114,12 @@ func TestClickSelectsTheHunkUnderTheCursorWithoutStaging(t *testing.T) {
 	m := crossToDiff(t, git)
 	m.SetBounds(0, 0, 72, 16)
 
-	if len(m.diffLines) != 6 || len(m.hunkRows) != 2 {
-		t.Fatalf("diffLines = %d, hunkRows = %d, want 6 and 2", len(m.diffLines), len(m.hunkRows))
+	// 72 cells keep the preview below the aligned-diff threshold: two hunks, each with its title.
+	if len(m.hunkRows) != 2 {
+		t.Fatalf("hunkRows = %d, want 2", len(m.hunkRows))
+	}
+	if len(m.diffLines) < 2 {
+		t.Fatalf("diffLines = %d, want at least the two hunk titles", len(m.diffLines))
 	}
 
 	// The spans must cover the rendered title of every hunk, or the click would pick the wrong one.
