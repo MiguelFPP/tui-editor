@@ -81,6 +81,9 @@ type Deps struct {
 	Editor ports.EditorService
 	Docker ports.DockerService
 	Keys   keymap.Registry
+
+	// SaveLayout persists the tree layout; nil means the layout is not persisted.
+	SaveLayout func(width int, collapsed bool) error
 }
 
 // Model is the root model: it owns the tabs, the layout, the focus and the toasts.
@@ -102,11 +105,20 @@ type Model struct {
 	width  int
 	height int
 
-	tabRects   [tabCount]image.Rectangle
-	treeRect   image.Rectangle
-	editorRect image.Rectangle
-	gitRect    image.Rectangle
-	dockerRect image.Rectangle
+	tabRects     [tabCount]image.Rectangle
+	treeRect     image.Rectangle
+	editorRect   image.Rectangle
+	gitRect      image.Rectangle
+	dockerRect   image.Rectangle
+	splitterRect image.Rectangle
+	collapseRect image.Rectangle
+
+	// Layout of the Files tab: the explicit tree width, the handle state and the button.
+	treeWidth     int
+	treeCollapsed bool
+	dragging      bool
+	dragDirty     bool
+	saveLayout    func(int, bool) error
 
 	help       bool
 	configOpen bool
@@ -124,6 +136,11 @@ type toastExpiredMsg struct {
 	seq int
 }
 
+// layoutSavedMsg carries the result of persisting the tree layout.
+type layoutSavedMsg struct {
+	err error
+}
+
 // New builds the root model for the given dependencies.
 func New(deps Deps) Model {
 	keys := deps.Keys
@@ -132,20 +149,23 @@ func New(deps Deps) Model {
 	}
 
 	m := Model{
-		cfg:      deps.Config,
-		files:    deps.Files,
-		editors:  deps.Editor,
-		keys:     keys,
-		tree:     filetree.New(deps.Files, "", keys),
-		git:      gitpanel.New(deps.Git, keys),
-		docker:   dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
-		tab:      FilesTab,
-		focus:    FocusTree,
-		width:    defaultWidth,
-		height:   defaultHeight,
-		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
-		spinning: true,
+		cfg:           deps.Config,
+		files:         deps.Files,
+		editors:       deps.Editor,
+		keys:          keys,
+		tree:          filetree.New(deps.Files, "", keys),
+		git:           gitpanel.New(deps.Git, keys),
+		docker:        dockerpanel.New(deps.Docker, deps.Config.Repo, keys),
+		tab:           FilesTab,
+		width:         defaultWidth,
+		height:        defaultHeight,
+		treeWidth:     deps.Config.TreeWidth,
+		treeCollapsed: deps.Config.TreeCollapsed,
+		saveLayout:    deps.SaveLayout,
+		spinner:       spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.Spinner)),
+		spinning:      true,
 	}
+	m.focus = m.filesFocus() // a collapsed tree leaves the editor as the only panel
 	m.resize()
 
 	return m
@@ -186,6 +206,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toastExpiredMsg:
 		if msg.seq == m.toastSeq {
 			m.toast = ""
+		}
+	case layoutSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, m.notify(msg.err.Error()))
 		}
 	case filetree.FileChosenMsg:
 		if m.editorDirty() {
@@ -518,21 +542,48 @@ func (m *Model) setTab(tab Tab) tea.Cmd {
 		m.focus = FocusDocker
 		cmd = m.docker.SetActive(true)
 	default:
-		m.focus = FocusTree
+		m.focus = m.filesFocus()
 	}
+	m.resize() // the tree button of the tab row belongs to the Files tab only
 
 	return cmd
+}
+
+// filesFocus is the panel that owns the keyboard inside the Files tab.
+func (m Model) filesFocus() Focus {
+	if m.treeCollapsed {
+		return FocusEditor
+	}
+
+	return FocusTree
 }
 
 // toggleFocus alternates between the tree and the editor inside the Files tab.
 func (m *Model) toggleFocus() {
 	if !m.hasEditor || m.focus == FocusEditor {
-		m.focus = FocusTree
+		m.focus = m.filesFocus() // a collapsed tree never takes the keyboard
 
 		return
 	}
 
 	m.focus = FocusEditor
+}
+
+// canSplit reports whether the Files tab shows a draggable splitter: a tree beside the editor.
+func (m Model) canSplit() bool {
+	width, _ := m.canvas()
+	treeW := m.treeWidthNow(width)
+
+	return m.tab == FilesTab && treeW > 0 && width > treeW
+}
+
+// treeWidthNow returns the outer width of the tree, or zero while it is collapsed.
+func (m Model) treeWidthNow(width int) int {
+	if m.treeCollapsed {
+		return 0
+	}
+
+	return splitWidth(width, m.treeWidth)
 }
 
 // editorDirty reports whether the open file holds a draft that is not on disk yet.

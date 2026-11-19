@@ -196,7 +196,7 @@ func TestFramedPanelsFillTheCanvasExactly(t *testing.T) {
 				}
 
 				// The frames tile the body: no gap between them and no overflow past the canvas.
-				treeW := splitWidth(size.width)
+				treeW := splitWidth(size.width, 0)
 				switch m.tab {
 				case GitTab:
 					assertFrameSpan(t, "git", m.gitRect, 0, size.width)
