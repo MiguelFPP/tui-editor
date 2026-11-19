@@ -269,6 +269,21 @@ repositorio.
   ni reserva memoria: `BenchmarkInactiveTickNoPoll` reporta **0 allocs/op**.
 - **Objetivo de consumo:** CPU inactiva ≈ 0 % con la pestaña Docker visible y RAM
   **< 30 MB**.
+- **Medición local:** smoke con la TUI real en pseudo-TTY (`--repo /src`, pestaña
+  Files): proceso `tui-editor` con **22.8 MB RSS** y salida limpia (exit 0). El
+  benchmark del tick Docker inactivo reporta **0 allocs/op**.
+
+## Calidad
+
+| Comprobación | Resultado |
+| :--- | :--- |
+| `make test` (`-count=1`) | suite completa en verde |
+| `make test-race` (`-count=1`) | detector de carreras en verde |
+| `make test-integration PKG='./...'` | integración Git/Docker opt-in en verde |
+| `make vet` | `go vet ./...` limpio |
+| `make build` / `goreleaser build --snapshot --clean` | imágenes y 6 binarios |
+| Cobertura crítica | domain 98.9 %, git 92.9 %, docker 90.5 %, app 93.6 % |
+| Smoke TUI | pseudo-TTY, exit 0; VHS/GIF pendiente de herramienta externa |
 
 ## Comandos
 

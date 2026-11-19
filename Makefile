@@ -21,7 +21,7 @@ build: ## Build the Docker images
 	$(COMPOSE) --profile prod build
 
 test: ## Run go test ./... inside the dev container (CI and final phase only)
-	$(COMPOSE_RUN) dev go test ./...
+	$(COMPOSE_RUN) dev go test -count=1 ./...
 
 vet: ## Run go vet ./... inside the dev container (CI and final phase only)
 	$(COMPOSE_RUN) dev go vet ./...
@@ -40,7 +40,7 @@ test-integration: ## Run integration tests: make test-integration PKG='...' [RUN
 	$(COMPOSE_RUN) dev go test -tags integration $(if $(RUN),-run '$(RUN)') $(PKG)
 
 test-race: ## Run go test -race ./... inside the dev container (final phase only)
-	$(COMPOSE_RUN) -e CGO_ENABLED=1 dev go test -race ./...
+	$(COMPOSE_RUN) -e CGO_ENABLED=1 dev go test -race -count=1 ./...
 
 vet-pkg: ## Run go vet for one package: make vet-pkg PKG='./internal/<pkg>/...'
 	@test -n "$(PKG)" || { echo "vet-pkg: PKG is required, e.g. make vet-pkg PKG='./internal/config/...'"; exit 1; }
