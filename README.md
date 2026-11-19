@@ -380,7 +380,7 @@ En las secciones `Cambios` y `Diff`, el panel muestra la lista a la izquierda y
 el preview del diff a la derecha cuando el ancho es de 100 celdas o más. La
 lista ocupa el 40 % con mínimo 28 celdas y el preview conserva al menos 34; por
 debajo de 100 celdas, o con `git_layout: "single"`, el panel vuelve a una sola
-columna sin perder contenido.
+columna sin perder contenido. Cada columna se dibuja en su propio marco.
 
 - `L` alterna entre una y dos columnas y guarda `git_layout` en `config.json`,
   conservando el tema, los atajos y el layout del árbol.
@@ -395,6 +395,9 @@ columna sin perder contenido.
   seleccionado.
 - El diff se colorea con el lexer del archivo, manteniendo el gutter y los
   marcadores `+`/`-`; un archivo sin lexer se muestra plano.
+- Con el preview de 52 celdas o más, el diff se dibuja lado a lado: las líneas
+  antiguas a la izquierda y las nuevas a la derecha, numeradas por lado y
+  coloreadas por columna. Por debajo de ese ancho se mantiene el diff unificado.
 
 ### Archivo base
 

@@ -20,7 +20,8 @@ const (
 )
 
 // RenderDiffSplit renders d side by side: the old side on the left and the new one on the right,
-// with the hunk titles and the change markers of each side.
+// with the hunk titles and the change markers of each side. Each column is highlighted on its own,
+// so the lexer sees the old lines together and the new ones together.
 func RenderDiffSplit(d domain.Diff, width int, color bool) string {
 	switch {
 	case d.Binary:
@@ -38,11 +39,12 @@ func RenderDiffSplit(d domain.Diff, width int, color bool) string {
 
 		oldWidth, newWidth := splitNumberWidths(hunk.Rows)
 		sideWidth := splitSideWidth(width)
+		oldText, newText := highlightSides(d.Path, hunk.Rows, splitSideTextWidth(sideWidth, oldWidth, newWidth), color)
 
-		for _, row := range hunk.Rows {
+		for index, row := range hunk.Rows {
 			lines = append(lines,
-				splitCell(row.Old, oldWidth, sideWidth, color)+splitSeparator+
-					splitCell(row.New, newWidth, sideWidth, color))
+				splitCell(row.Old, oldText[index], oldWidth, sideWidth, color)+splitSeparator+
+					splitCell(row.New, newText[index], newWidth, sideWidth, color))
 		}
 	}
 
@@ -51,6 +53,75 @@ func RenderDiffSplit(d domain.Diff, width int, color bool) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// highlightSides colours each column of a hunk in its own pass; an unusable result falls back to the
+// plain texts. The text is clipped first, so the escapes are never cut in half.
+func highlightSides(path domain.RelPath, rows []domain.SplitRow, width int, color bool) ([]string, []string) {
+	oldText := make([]string, len(rows))
+	newText := make([]string, len(rows))
+
+	for index, row := range rows {
+		oldText[index] = clipSide(row.Old, width)
+		newText[index] = clipSide(row.New, width)
+	}
+
+	if !color {
+		return oldText, newText
+	}
+
+	highlightedOld := HighlightLines(path, strings.Join(nonEmpty(oldText), "\n"))
+	highlightedNew := HighlightLines(path, strings.Join(nonEmpty(newText), "\n"))
+
+	return mergeHighlighted(oldText, highlightedOld), mergeHighlighted(newText, highlightedNew)
+}
+
+// clipSide keeps the visible text of one side inside the cells it has.
+func clipSide(cell domain.SplitCell, width int) string {
+	if !cell.Filled {
+		return ""
+	}
+	if cell.Kind == domain.NoNewline {
+		return noNewlineText
+	}
+	if width <= 0 {
+		return cell.Text
+	}
+
+	return truncate(cell.Text, width)
+}
+
+// nonEmpty keeps the source lines of one column, in order.
+func nonEmpty(texts []string) []string {
+	out := make([]string, 0, len(texts))
+	for _, text := range texts {
+		if text != "" {
+			out = append(out, text)
+		}
+	}
+
+	return out
+}
+
+// mergeHighlighted puts the coloured lines back in place of the non-empty ones.
+func mergeHighlighted(texts, highlighted []string) []string {
+	out := make([]string, len(texts))
+
+	next := 0
+	for index, text := range texts {
+		if text == "" {
+			continue
+		}
+		if next < len(highlighted) {
+			out[index] = highlighted[next]
+		} else {
+			out[index] = text
+		}
+
+		next++
+	}
+
+	return out
 }
 
 // splitSeparator divides the two sides of the aligned diff.
@@ -65,8 +136,16 @@ func splitSideWidth(width int) int {
 	return max((width-len([]rune(splitSeparator)))/2, 0)
 }
 
+// splitSideTextWidth is the cells left for the source text of one side: its number, the gap and the
+// marker take the rest.
+func splitSideTextWidth(sideWidth, oldWidth, newWidth int) int {
+	number := max(oldWidth, newWidth)
+
+	return max(sideWidth-(number+len([]rune(numberGap))+1), 0)
+}
+
 // splitCell renders one side of an aligned row: its number, its marker and its text.
-func splitCell(cell domain.SplitCell, numberWidth, width int, color bool) string {
+func splitCell(cell domain.SplitCell, text string, numberWidth, width int, color bool) string {
 	if !cell.Filled {
 		return padLine("", width)
 	}
@@ -77,20 +156,17 @@ func splitCell(cell domain.SplitCell, numberWidth, width int, color bool) string
 	}
 
 	prefix := fmt.Sprintf("%s%s%s", number, numberGap, splitMarker(cell.Kind))
-	body := cell.Text
+	body := text
 	if cell.Kind == domain.NoNewline {
 		body = noNewlineText
 	}
-
-	if width > 0 {
-		body = truncate(body, max(width-lipgloss.Width(prefix), 0))
-	}
-
 	if !color {
 		return padLine(prefix+body, width)
 	}
 
-	return styles.Gutter.Render(prefix) + styled(splitLineStyle(cell.Kind), body, color)
+	// The padding goes inside the styled span, so the tint covers the whole cell.
+	return styles.Gutter.Render(prefix) +
+		styled(splitLineStyle(cell.Kind), padLine(body, max(width-lipgloss.Width(prefix), 0)), color)
 }
 
 // splitMarker is the diff prefix of one side.

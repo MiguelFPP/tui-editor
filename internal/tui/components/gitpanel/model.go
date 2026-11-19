@@ -578,16 +578,21 @@ func alignedSpans(diff domain.Diff) []rowSpan {
 	return spans
 }
 
-// highlightKeyFor identifies the cached preview: the path, the mode and the width decide the lexer.
+// highlightKeyFor identifies the cached preview: the path, the mode, the layout and the width decide
+// the lexer and the row count.
 func (m Model) highlightKeyFor() string {
-	return fmt.Sprintf("%s|%t|%d", m.request.Path, m.request.Staged, m.width)
+	return fmt.Sprintf("%s|%t|%t|%d", m.request.Path, m.request.Staged, m.splitDiffWanted(), m.previewWidth())
 }
 
-// highlightedPreview colours the body of the diff once per key; a repeated render reuses it.
+// highlightedPreview colours the body of the diff once per key; a repeated render reuses it. The
+// aligned layout already carries its colours per side, so only the unified body is re-highlighted.
 func (m *Model) highlightedPreview() []string {
 	key := m.highlightKeyFor()
 	if m.highlightKey == key && len(m.highlighted) == len(m.diffLines) {
 		return m.highlighted
+	}
+	if m.splitDiffWanted() {
+		return m.diffLines
 	}
 
 	return common.HighlightDiffLines(m.request.Path, m.diffLines)

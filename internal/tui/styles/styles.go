@@ -17,6 +17,8 @@ type Theme struct {
 	Border      string
 	Green       string
 	Red         string
+	AddedBg     string
+	RemovedBg   string
 }
 
 // catalog is the ordered list of themes; the first one is the default.
@@ -30,6 +32,8 @@ var catalog = []Theme{
 		Border:      "#565f89",
 		Green:       "#9ece6a",
 		Red:         "#f7768e",
+		AddedBg:     "#1f3b2d",
+		RemovedBg:   "#3b1f28",
 	},
 	{
 		Name:        "catppuccin-mocha",
@@ -40,6 +44,8 @@ var catalog = []Theme{
 		Border:      "#585b70",
 		Green:       "#a6e3a1",
 		Red:         "#f38ba8",
+		AddedBg:     "#26332a",
+		RemovedBg:   "#3a2430",
 	},
 	{
 		Name:        "dracula",
@@ -50,6 +56,8 @@ var catalog = []Theme{
 		Border:      "#44475a",
 		Green:       "#50fa7b",
 		Red:         "#ff5555",
+		AddedBg:     "#1e3a2a",
+		RemovedBg:   "#3a1e26",
 	},
 	{
 		Name:        "gruvbox-dark",
@@ -60,6 +68,8 @@ var catalog = []Theme{
 		Border:      "#504945",
 		Green:       "#b8bb26",
 		Red:         "#fb4934",
+		AddedBg:     "#2b331f",
+		RemovedBg:   "#3a2320",
 	},
 }
 
@@ -145,6 +155,8 @@ var (
 	Header         = lipgloss.NewStyle()
 	Added          = lipgloss.NewStyle()
 	Removed        = lipgloss.NewStyle()
+	AddedLine      = lipgloss.NewStyle()
+	RemovedLine    = lipgloss.NewStyle()
 	FailPlain      = lipgloss.NewStyle()
 )
 
@@ -181,6 +193,8 @@ func Apply(theme Theme) {
 	Header = PlainCells(lipgloss.NewStyle().Faint(true))
 	Added = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Green)))
 	Removed = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Red)))
+	AddedLine = PlainCells(lipgloss.NewStyle().Background(lipgloss.Color(theme.AddedBg)))
+	RemovedLine = PlainCells(lipgloss.NewStyle().Background(lipgloss.Color(theme.RemovedBg)))
 	FailPlain = PlainCells(lipgloss.NewStyle().Foreground(lipgloss.Color(theme.Red)))
 }
 

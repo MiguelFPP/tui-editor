@@ -115,7 +115,8 @@ func TestHighlightDiffLinesHandlesAnEmptySlice(t *testing.T) {
 	}
 }
 
-// TestPreviewUsesTheHighlightedBody checks that the panel renders the cached colouring.
+// TestPreviewUsesTheHighlightedBody checks that the panel renders the cached colouring. A wide
+// preview uses the aligned layout, which colours each side in its own pass.
 func TestPreviewUsesTheHighlightedBody(t *testing.T) {
 	m := open(t, goDiffFake(t))
 	m.SetSize(120, 20)
@@ -130,8 +131,11 @@ func TestPreviewUsesTheHighlightedBody(t *testing.T) {
 	if !strings.Contains(joined, "\x1b[") {
 		t.Error("diffRows() carries no ANSI escapes, want the coloured body")
 	}
-	if visible := plain(joined); !strings.Contains(visible, "package main") {
+	if visible := plain(joined); !strings.Contains(visible, "package mai") {
 		t.Errorf("diffRows() = %q, want the source kept", visible)
+	}
+	if m.splitDiffWanted() && !strings.Contains(plain(joined), "│") {
+		t.Errorf("diffRows() = %q, want the aligned separator", plain(joined))
 	}
 }
 
