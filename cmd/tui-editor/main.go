@@ -17,7 +17,12 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/tui/app"
 )
 
-const version = "0.2.0"
+// version and commit are overridden at build time with
+// -ldflags "-X main.version=... -X main.commit=...".
+var (
+	version = "0.3.0"
+	commit  = "dev"
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -38,7 +43,7 @@ func run() error {
 	}
 
 	if cfg.ShowVersion {
-		fmt.Fprintf(os.Stdout, "tui-editor %s\n", version)
+		fmt.Fprintln(os.Stdout, versionLine())
 
 		return nil
 	}
@@ -77,4 +82,14 @@ func run() error {
 	}
 
 	return nil
+}
+
+// versionLine prints tui-editor <version> and appends the commit when one was
+// injected by the release build; local builds keep the default "dev" marker.
+func versionLine() string {
+	if commit == "" || commit == "dev" {
+		return "tui-editor " + version
+	}
+
+	return fmt.Sprintf("tui-editor %s (%s)", version, commit)
 }
