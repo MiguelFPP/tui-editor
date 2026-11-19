@@ -4,10 +4,10 @@ TUI multiplataforma en Go que unifica el flujo diario de desarrollo: exploració
 y edición rápida de archivos, control completo de Git y monitorización de
 contenedores Docker. Funciona con teclado y ratón.
 
-Estado actual: **v0.4.0 (mejoras de interfaz)**. Sobre v0.3.2, esta versión hace
-clicables las pestañas, mantiene el resaltado de sintaxis al editar, enmarca
-cada panel con el foco visible y limita el panel Docker a los contenedores del
-proyecto abierto. Los instaladores de v0.3.2 se mantienen sin cambios.
+Estado actual: **v0.5.0 (temas y atajos configurables)**. Sobre v0.4.0, esta
+versión añade un catálogo de cuatro temas, configuración JSON en XDG para tema y
+atajos, ayuda/footers generados desde el registro y un overlay `,` para
+consultar la configuración. Los instaladores no cambian.
 
 ## Demo
 
@@ -153,14 +153,14 @@ Opciones de `install.sh`:
 ```bash
 # Versión concreta y directorio propio
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
-  | sh -s -- --version v0.3.2 --dir "$HOME/bin"
+  | sh -s -- --version v0.5.0 --dir "$HOME/bin"
 
 # Sin verificar el checksum (no recomendado)
 curl -fsSL https://raw.githubusercontent.com/MiguelFPP/tui-editor/main/scripts/install.sh \
   | sh -s -- --no-verify
 ```
 
-Opciones de `install.ps1`: `-Version v0.3.2`, `-Dir C:\Tools\tui-editor`,
+Opciones de `install.ps1`: `-Version v0.5.0`, `-Dir C:\Tools\tui-editor`,
 `-NoVerify` y `-NoPath` (no tocar el `PATH` de usuario).
 
 Ningún instalador requiere `sudo` por sí mismo: si escribes en un directorio del
@@ -191,12 +191,12 @@ linux/darwin/windows × amd64/arm64, más un `checksums.txt`, desde la página d
 [releases](https://github.com/MiguelFPP/tui-editor/releases).
 
 El nombre del asset **incluye la versión**, así que sustituye `<version>` por la
-versión publicada (por ejemplo `0.3.2`; el prefijo `v` no forma parte del
+versión publicada (por ejemplo `0.5.0`; el prefijo `v` no forma parte del
 nombre):
 
 ```bash
 # Linux amd64
-version=0.3.2
+version=0.5.0
 curl -fL -O "https://github.com/MiguelFPP/tui-editor/releases/download/v${version}/tui-editor_${version}_linux_amd64.tar.gz"
 tar -xzf "tui-editor_${version}_linux_amd64.tar.gz"
 ./tui-editor --version
@@ -238,7 +238,7 @@ Para inyectar la versión igual que GoReleaser:
 
 ```bash
 go build -trimpath \
-  -ldflags "-s -w -X main.version=0.3.2 -X main.commit=$(git rev-parse --short HEAD)" \
+  -ldflags "-s -w -X main.version=0.5.0 -X main.commit=$(git rev-parse --short HEAD)" \
   -o tui-editor ./cmd/tui-editor
 ```
 
@@ -575,8 +575,8 @@ El release se dispara con un tag `v*`:
 
 ```bash
 # el usuario crea el tag; el workflow .github/workflows/release.yml publica
-git tag v0.3.2
-git push origin v0.3.2
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 El workflow usa GoReleaser v2.20.2 (`.goreleaser.yaml`) y `GITHUB_TOKEN` para
@@ -587,7 +587,7 @@ el gate de CI (`test`) siguen siendo la vía de merge.
 
 | Flag | Default | Descripción |
 | --- | --- | --- |
-| `--version` | — | Imprime `tui-editor 0.3.2` (builds de release añaden el commit) y sale con código 0 |
+| `--version` | — | Imprime `tui-editor 0.5.0` (builds de release añaden el commit) y sale con código 0 |
 | `--repo DIR` | directorio actual | Raíz del repositorio. Debe existir y ser un directorio; se guarda en ruta absoluta |
 | `--editor CMD` | `$EDITOR` o `vim` | Comando del editor externo; el binario debe existir en el `PATH` del entorno donde corre la TUI |
 | `--docker-host URL` | `$DOCKER_HOST` | Endpoint del daemon Docker. Solo se aceptan los esquemas `unix`, `tcp` y `npipe`; el socket no se valida al arrancar |
