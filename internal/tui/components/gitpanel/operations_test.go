@@ -11,6 +11,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // opsFake answers the reads of the branch, stash and sync sections.
@@ -173,7 +174,7 @@ func TestBranchKeysBelongToTheBranchesSection(t *testing.T) {
 	}
 
 	// The same keys stay inert without a service.
-	empty := New(nil)
+	empty := New(nil, keymap.Default())
 	empty.SetSize(72, 14)
 	empty = goTo(t, empty, Branches)
 	empty = settle(t, empty, typed('n'))

@@ -17,6 +17,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const (
@@ -149,6 +150,7 @@ var errNoService = errors.New("dockerpanel: servicio de docker no configurado")
 type Model struct {
 	docker   ports.DockerService
 	repoRoot string
+	keys     keymap.Registry
 	showAll  bool
 	scope    domain.ContainerScope
 
@@ -202,11 +204,17 @@ type Model struct {
 	rowRects []image.Rectangle
 }
 
-// New builds the panel scoped to repoRoot; nothing is read until the tab becomes active.
-func New(docker ports.DockerService, repoRoot string) Model {
+// New builds the panel scoped to repoRoot; nothing is read until the tab becomes active. An empty
+// keymap falls back to the built-in defaults.
+func New(docker ports.DockerService, repoRoot string, keys keymap.Registry) Model {
+	if len(keys.All()) == 0 {
+		keys = keymap.Default()
+	}
+
 	m := Model{
 		docker:   docker,
 		repoRoot: strings.TrimSpace(repoRoot),
+		keys:     keys,
 		viewport: viewport.New(),
 		interval: defaultTickInterval,
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -285,10 +286,29 @@ func load(t *testing.T, m Model, cmd tea.Cmd) Model {
 func open(t *testing.T, git *fakes.GitService) Model {
 	t.Helper()
 
-	m := New(git)
+	return openWith(t, git, keymap.Default())
+}
+
+// openWith opens the panel driven by a custom keymap.
+func openWith(t *testing.T, git *fakes.GitService, keys keymap.Registry) Model {
+	t.Helper()
+
+	m := New(git, keys)
 	m.SetSize(72, 14)
 
 	return loadAll(t, m, m.Init())
+}
+
+// overrideKeys returns the default registry with the overrides applied on top of it.
+func overrideKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
 }
 
 // loadAll drains a batch of commands, feeding every message back in order.
@@ -346,7 +366,7 @@ func goTo(t *testing.T, m Model, section Section) Model {
 
 func TestNewLoadsStatusAndBranchesOnInit(t *testing.T) {
 	git := gitFake(t)
-	m := New(git)
+	m := New(git, keymap.Default())
 	m.SetSize(72, 14)
 
 	if m.Section() != Changes {
@@ -760,7 +780,7 @@ func TestStatesWhenThereIsNothingToShow(t *testing.T) {
 }
 
 func TestMissingServiceReportsAnError(t *testing.T) {
-	m := New(nil)
+	m := New(nil, keymap.Default())
 	m.SetSize(72, 14)
 
 	m = loadAll(t, m, m.Init())
@@ -895,7 +915,7 @@ func TestSectionLabels(t *testing.T) {
 
 func TestLoadingAndErrReportTheSectionState(t *testing.T) {
 	git := gitFake(t)
-	m := New(git)
+	m := New(git, keymap.Default())
 	m.SetSize(72, 14)
 
 	if !m.Loading() {
@@ -1226,7 +1246,7 @@ func TestCommitWithoutStagedChangesDoesNotReload(t *testing.T) {
 }
 
 func TestCommitNeedsAService(t *testing.T) {
-	m := New(nil)
+	m := New(nil, keymap.Default())
 	m.SetSize(72, 14)
 
 	next, cmd := m.Update(key('c'))
@@ -1496,4 +1516,148 @@ func TestCommitModalIgnoresUnrelatedMessages(t *testing.T) {
 	if !next.CapturesInput() || next.commit.area.Value() != "" {
 		t.Error("an unrelated message changed the modal")
 	}
+}
+
+func TestEmptyKeymapFallsBackToTheDefaults(t *testing.T) {
+	m := openWith(t, gitFake(t), keymap.Registry{})
+
+	m = press(t, m, key(tea.KeyTab))
+	if m.Section() != Diff {
+		t.Errorf("Section() = %v after tab, want %v with the built-in defaults", m.Section(), Diff)
+	}
+}
+
+func TestKeymapOverridesDriveTheGitScope(t *testing.T) {
+	git := gitFake(t)
+	m := openWith(t, git, overrideKeys(t, map[string][]string{"git_stage": {"w"}}))
+	m = press(t, m, key(tea.KeyDown))
+
+	m = settle(t, m, typed('w'))
+	if got := git.CallCount("Stage"); got != 1 {
+		t.Fatalf("Stage calls after w = %d, want 1", got)
+	}
+	if got, want := stagedPaths(t, git, "Stage"), []domain.RelPath{"normal.txt"}; !slices.Equal(got, want) {
+		t.Errorf("Stage paths = %q, want %q", got, want)
+	}
+
+	// The overridden key replaces the default one, it does not add to it.
+	before := git.CallCount("Stage")
+	m = settle(t, m, typed('s'))
+	if got := git.CallCount("Stage"); got != before {
+		t.Errorf("Stage calls after s = %d, want %d: the default key was replaced", got, before)
+	}
+}
+
+func TestKeymapOverridesTheSectionKeys(t *testing.T) {
+	keys := overrideKeys(t, map[string][]string{
+		"git_section_next": {"n"},
+		"git_new_branch":   {"b"}, // frees n for the section key
+	})
+	m := openWith(t, gitFake(t), keys)
+
+	m = press(t, m, typed('n'))
+	if m.Section() != Diff {
+		t.Fatalf("Section() = %v after n, want %v", m.Section(), Diff)
+	}
+
+	// tab no longer advances the section.
+	m = press(t, m, key(tea.KeyTab))
+	if m.Section() != Diff {
+		t.Errorf("Section() = %v after tab, want %v: the default key was replaced", m.Section(), Diff)
+	}
+
+	// The section that keeps its default key still answers to it.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.Section() != Changes {
+		t.Errorf("Section() = %v after shift+tab, want %v", m.Section(), Changes)
+	}
+}
+
+// TestKeymapOverridesKeepTheModalKeysFixed checks that reassigning the configurable keys of the
+// panel never changes the fixed keys of the commit, prompt and confirmation modals.
+func TestKeymapOverridesKeepTheModalKeysFixed(t *testing.T) {
+	keys := overrideKeys(t, map[string][]string{
+		"git_commit": {"w"},
+		"git_stage":  {"c"}, // the swapped keys stay configurable
+	})
+
+	t.Run("commit: ctrl+s saves and esc cancels", func(t *testing.T) {
+		git := gitFake(t)
+		m := openWith(t, git, keys)
+
+		m = editKey(t, m, typed('w'))
+		if !m.CapturesInput() {
+			t.Fatal("w did not open the commit modal")
+		}
+		m = typeText(t, m, "mensaje")
+
+		m = editKey(t, m, key(tea.KeyTab))
+		m = editKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+		if !m.CapturesInput() || m.commit.area.Value() != "mensaje" {
+			t.Fatalf("tab left the commit modal or reached the draft")
+		}
+
+		m = settle(t, m, ctrlKey('s'))
+		if got := git.CallCount("Commit"); got != 1 {
+			t.Fatalf("Commit calls after ctrl+s = %d, want 1", got)
+		}
+		if m.CapturesInput() {
+			t.Error("the commit modal stayed open after a successful commit")
+		}
+
+		m = editKey(t, m, typed('w'))
+		m = settle(t, m, key(tea.KeyEscape))
+		if m.CapturesInput() {
+			t.Error("esc did not close the commit modal")
+		}
+	})
+
+	t.Run("prompt: enter confirms and esc cancels", func(t *testing.T) {
+		git := opsFake(t)
+		m := goTo(t, openWith(t, git, keys), Branches)
+
+		m = settle(t, m, typed('n'))
+		m = typeText(t, m, "nueva")
+		m = editKey(t, m, key(tea.KeyTab))
+		if !m.CapturesInput() || m.prompt.input.Value() != "nueva" {
+			t.Fatalf("tab left the prompt or reached the input")
+		}
+
+		m = settle(t, m, key(tea.KeyEnter))
+		if got := git.CallCount("CreateBranch"); got != 1 {
+			t.Fatalf("CreateBranch calls after enter = %d, want 1", got)
+		}
+
+		m = settle(t, m, typed('n'))
+		m = settle(t, m, key(tea.KeyEscape))
+		if m.CapturesInput() {
+			t.Error("esc did not close the prompt")
+		}
+	})
+
+	t.Run("confirmation: y accepts and n cancels", func(t *testing.T) {
+		git := opsFake(t)
+		m := goTo(t, openWith(t, git, keys), Branches)
+
+		m = settle(t, m, key(tea.KeyDown))
+		m = settle(t, m, typed('x'))
+		if !m.CapturesInput() {
+			t.Fatal("x did not open the confirmation")
+		}
+		m = editKey(t, m, key(tea.KeyTab))
+		if !m.CapturesInput() {
+			t.Fatal("tab closed the confirmation")
+		}
+
+		m = settle(t, m, typed('n'))
+		if m.CapturesInput() || git.CallCount("DeleteBranch") != 0 {
+			t.Fatal("n did not cancel the confirmation")
+		}
+
+		m = settle(t, m, typed('x'))
+		m = settle(t, m, typed('y'))
+		if got := git.CallCount("DeleteBranch"); got != 1 {
+			t.Fatalf("DeleteBranch calls after y = %d, want 1", got)
+		}
+	})
 }

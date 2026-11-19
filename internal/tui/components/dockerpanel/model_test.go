@@ -13,15 +13,33 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // testModel builds a panel of a fixed size; the ticker is shortened so a batch never waits.
 func testModel(docker ports.DockerService) Model {
-	m := New(docker, "")
+	return testModelWith(docker, keymap.Default())
+}
+
+// testModelWith builds a panel driven by a custom keymap.
+func testModelWith(docker ports.DockerService, keys keymap.Registry) Model {
+	m := New(docker, "", keys)
 	m.interval = 0
 	m.SetSize(100, 24)
 
 	return m
+}
+
+// overrideKeys returns the default registry with the overrides applied on top of it.
+func overrideKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
 }
 
 func sampleContainers() []domain.ContainerSummary {
@@ -55,7 +73,14 @@ func manyContainers(count int) []domain.ContainerSummary {
 func loaded(t *testing.T, docker ports.DockerService) Model {
 	t.Helper()
 
-	m := testModel(docker)
+	return loadedWith(t, docker, keymap.Default())
+}
+
+// loadedWith builds a loaded panel driven by a custom keymap.
+func loadedWith(t *testing.T, docker ports.DockerService, keys keymap.Registry) Model {
+	t.Helper()
+
+	m := testModelWith(docker, keys)
 	m.SetActive(true) // marks the first load in flight, like entering the tab does
 	m = feed(t, m, containersMsg{seq: m.containersSeq, containers: sampleContainers()})
 
@@ -210,7 +235,7 @@ func TestDebounceOnePollPerTick(t *testing.T) {
 		t.Fatalf("defaultTickInterval = %v, want 1s", defaultTickInterval)
 	}
 
-	fresh := New(fakes.NewDockerService(), "")
+	fresh := New(fakes.NewDockerService(), "", keymap.Default())
 	if fresh.interval != time.Second {
 		t.Errorf("interval = %v, want 1s by default", fresh.interval)
 	}
@@ -658,7 +683,7 @@ func TestCapturesInputWithLogsAndConfirm(t *testing.T) {
 func scoped(t *testing.T, root string, containers []domain.ContainerSummary) Model {
 	t.Helper()
 
-	m := New(fakes.NewDockerService(), root)
+	m := New(fakes.NewDockerService(), root, keymap.Default())
 	m.interval = 0
 	m.SetSize(100, 24)
 	m.SetActive(true)
@@ -768,4 +793,104 @@ func TestScopeEmptyStateExplainsTheProjectMode(t *testing.T) {
 	if !strings.Contains(line, "este proyecto") {
 		t.Errorf("stateLine() = %q, want the project hint", line)
 	}
+}
+
+func TestEmptyKeymapFallsBackToTheDefaults(t *testing.T) {
+	m := testModelWith(fakes.NewDockerService(), keymap.Registry{})
+	m.SetActive(true)
+	m = feed(t, m, containersMsg{seq: m.containersSeq, containers: sampleContainers()})
+
+	m = feed(t, m, typed('l'))
+	if !m.logsOpen {
+		t.Error("l did not open the logs, want the built-in defaults")
+	}
+}
+
+func TestKeymapOverridesDriveTheDockerScope(t *testing.T) {
+	docker := withLogs(fakes.NewDockerService(), domain.LogPage{})
+	keys := overrideKeys(t, map[string][]string{"docker_logs": {"o"}})
+
+	next, cmd := loadedWith(t, docker, keys).Update(typed('o'))
+	if cmd == nil {
+		t.Fatal("o did not load the logs")
+	}
+	if !drain(t, next, cmd).logsOpen {
+		t.Error("o did not open the logs")
+	}
+
+	// The overridden key replaces the default one, it does not add to it.
+	other, cmd := loadedWith(t, docker, keys).Update(typed('l'))
+	if cmd != nil {
+		t.Errorf("command = %v, want nil: l no longer maps to the logs", cmd())
+	}
+	if other.logsOpen {
+		t.Error("l opened the logs after the override")
+	}
+}
+
+// TestKeymapOverridesKeepTheModalKeysFixed checks that a custom keymap never changes the fixed keys
+// of the confirmation and of the logs viewport.
+func TestKeymapOverridesKeepTheModalKeysFixed(t *testing.T) {
+	keys := overrideKeys(t, map[string][]string{
+		"docker_logs":  {"o"},
+		"docker_start": {"z"}, // the swapped keys stay configurable
+	})
+
+	t.Run("confirmation: enter accepts and n cancels", func(t *testing.T) {
+		docker := fakes.NewDockerService()
+		m := loadedWith(t, docker, keys)
+
+		m = feed(t, m, typed('z'))
+		if m.confirm != confirmStart || !m.CapturesInput() {
+			t.Fatal("z did not open the start confirmation")
+		}
+
+		m = feed(t, m, key(tea.KeyTab))
+		if !m.CapturesInput() {
+			t.Fatal("tab closed the confirmation")
+		}
+
+		m = feed(t, m, typed('n'))
+		if m.confirm != confirmNone {
+			t.Fatal("n did not cancel the confirmation")
+		}
+		if got := docker.CallCount("Start"); got != 0 {
+			t.Errorf("Start calls after n = %d, want 0", got)
+		}
+
+		m = feed(t, m, typed('z'))
+		m = feed(t, m, key(tea.KeyEnter))
+		if got := docker.CallCount("Start"); got != 1 {
+			t.Errorf("Start calls after enter = %d, want 1", got)
+		}
+	})
+
+	t.Run("logs: esc closes and r reloads", func(t *testing.T) {
+		docker := withLogs(fakes.NewDockerService(), domain.LogPage{Lines: []domain.LogLine{{Text: "uno"}}})
+		m := loadedWith(t, docker, keys)
+
+		m = feed(t, m, typed('o'))
+		if !m.logsOpen {
+			t.Fatal("o did not open the logs")
+		}
+
+		m = feed(t, m, key(tea.KeyTab))
+		if !m.logsOpen {
+			t.Fatal("tab closed the logs")
+		}
+
+		before := docker.CallCount("Logs")
+		m = feed(t, m, typed('r'))
+		if got := docker.CallCount("Logs"); got != before+1 {
+			t.Errorf("Logs calls after r = %d, want %d", got, before+1)
+		}
+		if !m.logsOpen {
+			t.Fatal("r closed the logs")
+		}
+
+		m = feed(t, m, key(tea.KeyEscape))
+		if m.logsOpen {
+			t.Error("esc did not close the logs")
+		}
+	})
 }

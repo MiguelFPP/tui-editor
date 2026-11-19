@@ -11,6 +11,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // Update applies one message; every read and every write goes through a command, never inline.
@@ -92,7 +93,8 @@ func (m *Model) handleClick(ev tea.Mouse) tea.Cmd {
 	return nil
 }
 
-// handleKey routes the keyboard of the open modal first, then the sections.
+// handleKey routes the keyboard of the open modal first, then resolves the key against the Git
+// scope of the registry.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case m.confirm.open:
@@ -103,56 +105,61 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleCommitKey(msg)
 	}
 
-	switch msg.String() {
-	case "tab":
+	action, ok := m.keys.Match(keymap.ScopeGit, msg.String())
+	if !ok {
+		return nil
+	}
+
+	switch action {
+	case keymap.ActionGitSectionNext:
 		return m.goSection(1)
-	case "shift+tab":
+	case keymap.ActionGitSectionPrev:
 		return m.goSection(-1)
-	case "j", "down":
+	case keymap.ActionGitUp:
 		m.moveCursor(1)
-	case "k", "up":
+	case keymap.ActionGitDown:
 		m.moveCursor(-1)
-	case "enter":
+	case keymap.ActionGitActivate:
 		return m.activate()
-	case "d":
+	case keymap.ActionGitDiff:
 		return m.toggleStaged()
-	case "s":
+	case keymap.ActionGitStage:
 		return m.stageKey()
-	case "u":
+	case keymap.ActionGitUnstage:
 		return m.unstageKey()
-	case "c":
+	case keymap.ActionGitCommit:
 		return m.openCommit()
-	case "n":
+	case keymap.ActionGitNewBranch:
 		return m.openNewBranch()
-	case "x":
+	case keymap.ActionGitDeleteBranch:
 		return m.destructiveKey()
-	case "m":
+	case keymap.ActionGitMerge:
 		return m.mergeKey()
-	case "z":
+	case keymap.ActionGitStash:
 		return m.stashKey()
-	case "o":
+	case keymap.ActionGitResolve:
 		return m.resolveKey(domain.Ours)
-	case "t":
+	case keymap.ActionGitResolveTheirs:
 		return m.resolveKey(domain.Theirs)
-	case "A":
+	case keymap.ActionGitAbortMerge:
 		return m.openAbortMerge()
-	case "f":
+	case keymap.ActionGitFetch:
 		return m.fetchKey()
-	case "p":
+	case keymap.ActionGitPull:
 		return m.pullKey()
-	case "P":
+	case keymap.ActionGitPush:
 		return m.pushKey()
-	case "[":
+	case keymap.ActionGitHunkPrev:
 		m.moveHunk(-1)
-	case "]":
+	case keymap.ActionGitHunkNext:
 		m.moveHunk(1)
-	case " ", "space":
+	case keymap.ActionGitHunkToggle:
 		m.toggleHunk()
-	case "r":
+	case keymap.ActionGitRefresh:
 		return m.Refresh()
-	case "esc":
+	case keymap.ActionGitBack:
 		m.back()
-	case "?":
+	case keymap.ActionGitHelp:
 		m.help = !m.help
 	}
 
@@ -657,20 +664,24 @@ func (m *Model) openCommit() tea.Cmd {
 
 // handleCommitKey drives the modal: the textarea edits, ctrl+s commits and esc cancels.
 func (m *Model) handleCommitKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "ctrl+s":
-		return m.submitCommit()
-	case "tab", "shift+tab":
-		return nil // the modal traps the focus: tab never leaves it
-	case "esc":
-		if m.writing {
-			return nil // the commit owns the modal until it answers
+	if action, ok := m.keys.Match(keymap.ScopeGitCommit, msg.String()); ok {
+		switch action {
+		case keymap.ActionGitCommitSave:
+			return m.submitCommit()
+		case keymap.ActionGitCommitCancel:
+			if m.writing {
+				return nil // the commit owns the modal until it answers
+			}
+
+			m.commit.open = false
+			m.commit.err = nil
+
+			return nil
 		}
+	}
 
-		m.commit.open = false
-		m.commit.err = nil
-
-		return nil
+	if key := msg.String(); key == "tab" || key == "shift+tab" {
+		return nil // the modal traps the focus: tab never leaves it
 	}
 
 	return m.updateCommit(msg)
@@ -707,19 +718,23 @@ func (m *Model) submitCommit() tea.Cmd {
 
 // handlePromptKey drives the one-line prompt: enter confirms and esc cancels.
 func (m *Model) handlePromptKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
-		return m.submitPrompt()
-	case "tab", "shift+tab":
-		return nil
-	case "esc":
-		if m.writing {
+	if action, ok := m.keys.Match(keymap.ScopeGitPrompt, msg.String()); ok {
+		switch action {
+		case keymap.ActionGitPromptConfirm:
+			return m.submitPrompt()
+		case keymap.ActionGitPromptCancel:
+			if m.writing {
+				return nil
+			}
+
+			m.cancelPrompt()
+
 			return nil
 		}
+	}
 
-		m.cancelPrompt()
-
-		return nil
+	if key := msg.String(); key == "tab" || key == "shift+tab" {
+		return nil // the modal traps the focus: tab never leaves it
 	}
 
 	return m.updatePrompt(msg)
@@ -799,19 +814,20 @@ func (m *Model) submitStashPush(message string) tea.Cmd {
 
 // handleConfirmKey resolves the confirmation: y or enter accepts, n or esc cancels.
 func (m *Model) handleConfirmKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "y", "enter":
+	action, ok := m.keys.Match(keymap.ScopeGitConfirm, msg.String())
+	if !ok {
+		return nil // every other key, tab included, is ignored: the confirmation keeps the focus
+	}
+
+	switch action {
+	case keymap.ActionGitConfirmYes:
 		return m.submitConfirm()
-	case "tab", "shift+tab":
-		return nil
-	case "n", "esc":
+	case keymap.ActionGitConfirmNo:
 		if m.writing {
 			return nil
 		}
 
 		m.confirm = confirmModal{}
-
-		return nil
 	}
 
 	return nil

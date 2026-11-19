@@ -19,6 +19,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const (
@@ -140,7 +141,8 @@ var errNoService = errors.New("gitpanel: servicio de git no configurado")
 
 // Model is the Git panel; it never performs I/O outside a command.
 type Model struct {
-	git ports.GitService
+	git  ports.GitService
+	keys keymap.Registry
 
 	section Section
 	cursors [sectionCount]int
@@ -262,10 +264,16 @@ type seqState struct {
 	write    int
 }
 
-// New builds the panel; Init asks for the status and the branches, nothing else.
-func New(git ports.GitService) Model {
+// New builds the panel; Init asks for the status and the branches, nothing else. An empty keymap
+// falls back to the built-in defaults.
+func New(git ports.GitService, keys keymap.Registry) Model {
+	if len(keys.All()) == 0 {
+		keys = keymap.Default()
+	}
+
 	m := Model{
 		git:     git,
+		keys:    keys,
 		loading: loadingState{status: true, branches: true},
 		seqs:    seqState{status: 1, branches: 1},
 		marked:  make(map[int]bool),
