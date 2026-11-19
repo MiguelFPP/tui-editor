@@ -14,6 +14,7 @@ import (
 
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -51,6 +52,7 @@ var errNoService = errors.New("filetree: servicio de archivos no configurado")
 type Model struct {
 	files ports.FileService
 	root  domain.RelPath
+	keys  keymap.Registry
 
 	entries   map[domain.RelPath][]domain.FileNode
 	expanded  map[domain.RelPath]bool
@@ -77,11 +79,17 @@ type Model struct {
 	now       func() time.Time
 }
 
-// New builds the component for one root; nothing is read until Init runs.
-func New(files ports.FileService, root domain.RelPath) Model {
+// New builds the component for one root; nothing is read until Init runs. An
+// empty keymap falls back to the built-in defaults.
+func New(files ports.FileService, root domain.RelPath, keys keymap.Registry) Model {
+	if len(keys.All()) == 0 {
+		keys = keymap.Default()
+	}
+
 	return Model{
 		files:     files,
 		root:      root,
+		keys:      keys,
 		entries:   map[domain.RelPath][]domain.FileNode{},
 		expanded:  map[domain.RelPath]bool{},
 		loading:   map[domain.RelPath]bool{},
@@ -217,35 +225,41 @@ func (m *Model) applyListing(msg dirLoadedMsg) {
 	m.truncated[msg.Dir] = msg.Listing.Truncated
 }
 
+// handleKey resolves one key against the tree scope; the text filter owns its own keys.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.filtering && m.filterKey(msg) {
 		return nil
 	}
 
-	switch msg.String() {
-	case "up", "k":
+	action, ok := m.keys.Match(keymap.ScopeTree, msg.String())
+	if !ok {
+		return nil
+	}
+
+	switch action {
+	case keymap.ActionTreeUp:
 		m.setCursor(m.cursor - 1)
-	case "down", "j":
+	case keymap.ActionTreeDown:
 		m.setCursor(m.cursor + 1)
-	case "pgup":
+	case keymap.ActionTreePageUp:
 		m.pageBy(-m.rows())
-	case "pgdown":
+	case keymap.ActionTreePageDown:
 		m.pageBy(m.rows())
-	case "home":
+	case keymap.ActionTreeHome:
 		m.setCursor(0)
-	case "end":
+	case keymap.ActionTreeEnd:
 		m.setCursor(len(m.displayed()) - 1)
-	case "right", "l":
+	case keymap.ActionTreeExpand:
 		if node, ok := m.Selected(); ok && node.Kind == domain.Dir {
 			return m.expand(node)
 		}
-	case "left", "h":
+	case keymap.ActionTreeCollapse:
 		return m.collapse()
-	case "enter", "space":
+	case keymap.ActionTreeActivate:
 		return m.activate()
-	case "/":
+	case keymap.ActionTreeFilter:
 		m.startFilter()
-	case "esc":
+	case keymap.ActionTreeClearFilter:
 		if m.filter != "" {
 			m.filter = ""
 			m.resetCursor()

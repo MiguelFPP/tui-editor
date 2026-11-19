@@ -17,6 +17,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/common"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 	"github.com/MiguelFPP/tui-editor/internal/tui/styles"
 )
 
@@ -65,6 +66,7 @@ var errNoService = errors.New("editor: servicio de archivos no configurado")
 type Model struct {
 	files   ports.FileService
 	editors ports.EditorService
+	keys    keymap.Registry
 	path    domain.RelPath
 	mode    mode
 	diff    domain.Diff
@@ -94,11 +96,17 @@ type Model struct {
 	height int
 }
 
-// New opens path in preview mode; the only read happens in Init.
-func New(files ports.FileService, editors ports.EditorService, path domain.RelPath) Model {
+// New opens path in preview mode; the only read happens in Init. An empty
+// keymap falls back to the built-in defaults.
+func New(files ports.FileService, editors ports.EditorService, path domain.RelPath, keys keymap.Registry) Model {
+	if len(keys.All()) == 0 {
+		keys = keymap.Default()
+	}
+
 	m := Model{
 		files:    files,
 		editors:  editors,
+		keys:     keys,
 		path:     path,
 		mode:     modeFile,
 		viewport: viewport.New(),
@@ -122,6 +130,7 @@ func newArea() textarea.Model {
 // NewDiff builds the diff preview from data already in memory, without I/O.
 func NewDiff(d domain.Diff) Model {
 	m := Model{
+		keys:     keymap.Default(),
 		path:     d.Path,
 		mode:     modeDiff,
 		diff:     d,

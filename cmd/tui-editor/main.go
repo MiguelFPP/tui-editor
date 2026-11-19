@@ -15,6 +15,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/domain"
 	"github.com/MiguelFPP/tui-editor/internal/ports"
 	"github.com/MiguelFPP/tui-editor/internal/tui/app"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 // version and commit are overridden at build time with
@@ -48,6 +49,11 @@ func run() error {
 		return nil
 	}
 
+	keys, err := keymap.Default().Apply(cfg.Keys)
+	if err != nil {
+		return fmt.Errorf("aplicar atajos: %w", err)
+	}
+
 	root, err := domain.NewRepoPath(cfg.Repo)
 	if err != nil {
 		return fmt.Errorf("resolver la raíz del repositorio: %w", err)
@@ -74,7 +80,7 @@ func run() error {
 		dockerSvc = service
 	}
 
-	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc}
+	deps := app.Deps{Config: cfg, Files: files, Git: gitSvc, Editor: editorSvc, Docker: dockerSvc, Keys: keys}
 
 	program := tea.NewProgram(app.New(deps))
 	if _, err := program.Run(); err != nil {

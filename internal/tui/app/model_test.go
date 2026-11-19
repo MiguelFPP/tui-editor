@@ -15,6 +15,7 @@ import (
 	"github.com/MiguelFPP/tui-editor/internal/testutil/fakes"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/filetree"
 	"github.com/MiguelFPP/tui-editor/internal/tui/components/gitpanel"
+	"github.com/MiguelFPP/tui-editor/internal/tui/keymap"
 )
 
 const treeLines = 30
@@ -73,7 +74,14 @@ func testDeps(t *testing.T) Deps {
 		}, nil
 	}
 
-	deps := Deps{Config: config.Config{Repo: t.TempDir(), Editor: "vim"}, Files: files, Git: git, Editor: editors, Docker: docker}
+	deps := Deps{
+		Config: config.Config{Repo: t.TempDir(), Editor: "vim"},
+		Files:  files,
+		Git:    git,
+		Editor: editors,
+		Docker: docker,
+		Keys:   keymap.Default(),
+	}
 
 	return deps
 }
@@ -255,6 +263,104 @@ func TestQuitKeys(t *testing.T) {
 				t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
 			}
 		})
+	}
+}
+
+// withKeys returns the default registry with the overrides applied on top of it.
+func withKeys(t *testing.T, overrides map[string][]string) keymap.Registry {
+	t.Helper()
+
+	keys, err := keymap.Default().Apply(overrides)
+	if err != nil {
+		t.Fatalf("Apply(%v) = %v, want no error", overrides, err)
+	}
+
+	return keys
+}
+
+func TestDefaultKeymapIsUsedWithoutOne(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = keymap.Registry{}
+
+	m := newSized(t, deps, 120, 40)
+	m = update(t, m, typed('2'))
+
+	if m.Tab() != GitTab {
+		t.Errorf("Tab() = %v, want the built-in keymap to switch the tab", m.Tab())
+	}
+}
+
+func TestTabsSwitchWithTheOverriddenKey(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"tab_git": {"g"}})
+
+	m := newSized(t, deps, 120, 40)
+	m = update(t, m, typed('g'))
+	if m.Tab() != GitTab || m.Focus() != FocusGit {
+		t.Errorf("tab/focus = %v/%v after g, want Git/git", m.Tab(), m.Focus())
+	}
+
+	// The default key is replaced, not added.
+	fresh := newSized(t, deps, 120, 40)
+	fresh = update(t, fresh, typed('2'))
+	if fresh.Tab() != FilesTab {
+		t.Errorf("Tab() = %v after 2, want the default key replaced", fresh.Tab())
+	}
+}
+
+func TestQuitKeyCanBeReassigned(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"quit": {"x"}})
+
+	m := newSized(t, deps, 120, 40)
+
+	cmd, stop := m.handleKey(typed('x'))
+	if !stop {
+		t.Fatal("x did not quit, want the reassigned key to quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
+	}
+
+	// q is no longer a quit key: it falls through to the focused panel.
+	if _, stop := m.handleKey(typed('q')); stop {
+		t.Error("q still quits, want the default key replaced")
+	}
+
+	// ctrl+c is fixed: reassigning quit never disables it.
+	cmd, stop = m.handleKey(ctrlC())
+	if !stop {
+		t.Fatal("ctrl+c did not quit, want the fixed key always active")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("command returned %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestDraftCapturesAReassignedQuitKey(t *testing.T) {
+	deps := testDeps(t)
+	deps.Keys = withKeys(t, map[string][]string{"quit": {"x"}})
+
+	m := newSized(t, deps, 120, 40)
+	m = openDraft(t, m, "main.go", 120)
+
+	// ctrl+c stays fixed: it quits while the draft is still clean.
+	if _, stop := m.handleKey(ctrlC()); !stop {
+		t.Error("ctrl+c did not quit, want the fixed key always active")
+	}
+
+	// The reassigned key is written into the draft instead of leaving the program.
+	if _, stop := m.handleKey(typed('x')); stop {
+		t.Error("x quit the program, want the draft to capture the reassigned key")
+	}
+	if !m.editor.CapturesInput() {
+		t.Error("CapturesInput() = false, want the draft kept open")
+	}
+	if got := m.editor.Err(); got != nil {
+		t.Errorf("Err() = %v, want no error from typing", got)
+	}
+	if !m.editor.Dirty() {
+		t.Error("Dirty() = false, want the reassigned key typed into the draft")
 	}
 }
 

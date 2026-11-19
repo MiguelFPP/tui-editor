@@ -16,7 +16,7 @@ const maxConfigBytes = 1 << 20
 
 // fileConfig mirrors the JSON file; names and action IDs are validated later.
 type fileConfig struct {
-	Theme string            `json:"theme"`
+	Theme string             `json:"theme"`
 	Keys  map[string]KeyList `json:"keys"`
 }
 
