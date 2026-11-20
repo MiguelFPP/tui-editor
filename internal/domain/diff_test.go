@@ -19,6 +19,82 @@ func TestDiffIsEmpty(t *testing.T) {
 	}
 }
 
+func TestDiffEqual(t *testing.T) {
+	base := Diff{
+		Path:      "main.go",
+		Additions: 1,
+		Deletions: 1,
+		Hunks: []DiffHunk{{
+			Header: "@@ -1,2 +1,2 @@", OldStart: 1, OldLines: 2, NewStart: 1, NewLines: 2,
+			Lines: []DiffLine{
+				{Kind: Context, Text: "uno", OldLine: 1, NewLine: 1},
+				{Kind: Removed, Text: "dos", OldLine: 2},
+				{Kind: Added, Text: "DOS", NewLine: 2},
+			},
+		}},
+	}
+
+	if !base.Equal(base) {
+		t.Error("Equal(itself) = false, want true")
+	}
+
+	cases := []struct {
+		name  string
+		other Diff
+	}{
+		{name: "other path", other: func() Diff { d := base; d.Path = "otro.go"; return d }()},
+		{name: "other orig path", other: func() Diff { d := base; d.OrigPath = "viejo.go"; return d }()},
+		{name: "other staged", other: func() Diff { d := base; d.Staged = true; return d }()},
+		{name: "binary", other: func() Diff { d := base; d.Binary = true; return d }()},
+		{name: "truncated", other: func() Diff { d := base; d.Truncated = true; return d }()},
+		{name: "new file", other: func() Diff { d := base; d.New = true; return d }()},
+		{name: "deleted file", other: func() Diff { d := base; d.Deleted = true; return d }()},
+		{name: "other additions", other: func() Diff { d := base; d.Additions = 2; return d }()},
+		{name: "other deletions", other: func() Diff { d := base; d.Deletions = 0; return d }()},
+		{name: "no hunks", other: Diff{Path: "main.go", Additions: 1, Deletions: 1}},
+		{name: "other header", other: func() Diff {
+			d := base
+			d.Hunks = []DiffHunk{{
+				Header: "@@ -5,2 +5,2 @@", OldStart: 5, OldLines: 2, NewStart: 5, NewLines: 2,
+				Lines: base.Hunks[0].Lines,
+			}}
+
+			return d
+		}()},
+		{name: "other section", other: func() Diff {
+			d := base
+			d.Hunks = []DiffHunk{{
+				Header: base.Hunks[0].Header, Section: "func main()", OldStart: 1, OldLines: 2, NewStart: 1, NewLines: 2,
+				Lines: base.Hunks[0].Lines,
+			}}
+
+			return d
+		}()},
+		{name: "fewer lines", other: func() Diff {
+			d := base
+			d.Hunks = []DiffHunk{{Header: base.Hunks[0].Header, Lines: base.Hunks[0].Lines[:2]}}
+
+			return d
+		}()},
+		{name: "other line text", other: func() Diff {
+			d := base
+			lines := append([]DiffLine(nil), base.Hunks[0].Lines...)
+			lines[2].Text = "OTRA"
+			d.Hunks = []DiffHunk{{Header: base.Hunks[0].Header, Lines: lines}}
+
+			return d
+		}()},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if base.Equal(tc.other) {
+				t.Error("Equal() = true, want the diffs to differ")
+			}
+		})
+	}
+}
+
 func TestDiffLineHoldsTextWithoutPrefixOrNewline(t *testing.T) {
 	hunk := DiffHunk{
 		Header:   "@@ -1,2 +1,2 @@",

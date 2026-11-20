@@ -36,7 +36,10 @@ const (
 	writeTimeout = 60 * time.Second
 	// networkTimeout bounds a fetch, a pull or a push, which talk to a remote.
 	networkTimeout = 2 * time.Minute
-	wheelStep      = 3
+	// pollInterval is the period of the quiet status read; the poller is disabled while the tab is
+	// hidden, so an external edit shows up within one period of opening it.
+	pollInterval = time.Second
+	wheelStep    = 3
 
 	// commitRows is the height of the commit message editor.
 	commitRows = 6
@@ -144,6 +147,21 @@ type statusLoadedMsg struct {
 	seq    int
 	status domain.GitStatus
 	err    error
+}
+
+// pollStatusMsg carries one quiet read of the working tree. It is kept apart from statusLoadedMsg
+// so a tick never touches the loading flags or the errors of the panel; epoch is the manual status
+// sequence it started under, and a manual read that lands in the meantime wins over this answer.
+type pollStatusMsg struct {
+	seq    int
+	epoch  int
+	status domain.GitStatus
+	err    error
+}
+
+// tickMsg is one period of the poller; the generation invalidates the ticks of a hidden tab.
+type tickMsg struct {
+	gen int
 }
 
 // branchesLoadedMsg carries the local branches.
@@ -277,6 +295,13 @@ type Model struct {
 	// panel does not persist anything.
 	saveLayout func(Layout, int, bool) error
 
+	// pollOn, tickGen and polling drive the conditional poller of the working tree: it only runs
+	// while the Git tab is visible and never overlaps a write or another poll.
+	pollOn   bool
+	tickGen  int
+	polling  bool
+	interval time.Duration
+
 	help bool
 }
 
@@ -353,6 +378,7 @@ type seqState struct {
 	diff     int
 	sides    int
 	write    int
+	poll     int
 }
 
 // sideSource says where one side of the diff is read from.
@@ -405,6 +431,7 @@ func NewWithOptions(git ports.GitService, keys keymap.Registry, opts Options) Mo
 		listWidth:     max(opts.ListWidth, 0),
 		listCollapsed: opts.ListCollapsed,
 		saveLayout:    opts.SaveLayout,
+		interval:      pollInterval,
 		loading:       loadingState{status: true, branches: true},
 		seqs:          seqState{status: 1, branches: 1},
 		marked:        make(map[int]bool),

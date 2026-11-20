@@ -95,6 +95,38 @@ func (s GitStatus) HasChanges() bool {
 	return len(s.Files) > 0
 }
 
+// Equal reports whether both snapshots describe the same working tree.
+func (s GitStatus) Equal(other GitStatus) bool {
+	if s.Branch != other.Branch || s.Upstream != other.Upstream {
+		return false
+	}
+	if s.Ahead != other.Ahead || s.Behind != other.Behind {
+		return false
+	}
+	if s.Detached != other.Detached || s.Unborn != other.Unborn || s.Truncated != other.Truncated {
+		return false
+	}
+	if len(s.Files) != len(other.Files) {
+		return false
+	}
+
+	for i, file := range s.Files {
+		if file != other.Files[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// SameRefs reports whether both snapshots point at the same branch and the same upstream counts;
+// the files are ignored, so a worktree edit alone never changes it.
+func (s GitStatus) SameRefs(other GitStatus) bool {
+	return s.Branch == other.Branch && s.Upstream == other.Upstream &&
+		s.Ahead == other.Ahead && s.Behind == other.Behind &&
+		s.Detached == other.Detached && s.Unborn == other.Unborn
+}
+
 func (s GitStatus) Staged() []GitFileStatus {
 	return filterFiles(s.Files, GitFileStatus.Staged)
 }

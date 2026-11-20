@@ -21,6 +21,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 	case statusLoadedMsg:
 		m.applyStatus(msg)
+	case pollStatusMsg:
+		return m, m.applyPollStatus(msg)
+	case tickMsg:
+		return m, m.onTick(msg)
 	case branchesLoadedMsg:
 		m.applyBranches(msg)
 	case stashesLoadedMsg:
@@ -212,6 +216,93 @@ func (m *Model) toggleList() tea.Cmd {
 	m.sync()
 
 	return m.saveLayoutCmd()
+}
+
+// SetActive starts or stops the conditional poller: it only runs while the Git tab is visible, so
+// an edit made by an external editor or an agentic harness reaches the panel without pressing r.
+func (m *Model) SetActive(active bool) tea.Cmd {
+	if !active {
+		m.pollOn = false
+		m.tickGen++ // invalidates the ticks already scheduled
+
+		return nil
+	}
+	if m.pollOn {
+		return nil
+	}
+
+	m.pollOn = true
+	m.tickGen++
+
+	// The immediate read makes entering the tab show the current worktree, not the cached one.
+	return tea.Batch(m.pollStatus(), m.scheduleTick())
+}
+
+// scheduleTick arms the next tick of the current generation, or nothing while inactive.
+func (m Model) scheduleTick() tea.Cmd {
+	if !m.pollOn {
+		return nil
+	}
+
+	gen := m.tickGen
+
+	return tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{gen: gen} })
+}
+
+// onTick starts at most one quiet read per period; a write or a manual read in flight, or a poll
+// still pending, skips the tick, but the next period is always armed so the poller never stalls.
+func (m *Model) onTick(msg tickMsg) tea.Cmd {
+	if !m.pollOn || msg.gen != m.tickGen {
+		return nil // inactive or stale generation: no read and no new tick
+	}
+	if m.writing || m.polling || m.loading.status {
+		return m.scheduleTick()
+	}
+
+	return tea.Batch(m.pollStatus(), m.scheduleTick())
+}
+
+// pollStatus reads the working tree without touching the loading flags: a tick must neither show
+// "cargando…" nor keep the status bar spinner turning.
+func (m *Model) pollStatus() tea.Cmd {
+	m.seqs.poll++
+	m.polling = true
+
+	return pollStatus(m.git, m.seqs.poll, m.seqs.status)
+}
+
+// applyPollStatus adopts the status only when it changed, and then catches up with whatever the
+// new snapshot invalidates. A failed poll is dropped: it is not evidence that the tree is clean,
+// and a manual read that started after this one already owns the panel.
+func (m *Model) applyPollStatus(msg pollStatusMsg) tea.Cmd {
+	if msg.seq != m.seqs.poll {
+		return nil
+	}
+
+	m.polling = false
+	if msg.err != nil {
+		return nil
+	}
+	if msg.epoch != m.seqs.status {
+		return nil // a manual refresh took over while this read was in flight
+	}
+	if m.status.Equal(msg.status) {
+		return nil // nothing changed: no mutation and no extra read
+	}
+
+	refsChanged := !m.status.SameRefs(msg.status)
+	m.status = msg.status
+	m.clamp(Changes)
+
+	commands := make([]tea.Cmd, 0, 2)
+	if refsChanged {
+		commands = append(commands, m.branchesQuiet())
+	}
+	if m.loaded {
+		commands = append(commands, m.loadDiffQuiet(m.request.Path))
+	}
+
+	return tea.Batch(commands...)
 }
 
 // handleKey routes the keyboard of the open modal first, then resolves the key against the Git
@@ -1053,6 +1144,24 @@ func (m *Model) loadDiff(path domain.RelPath) tea.Cmd {
 	return loadDiff(m.git, m.seqs.diff, request)
 }
 
+// loadDiffQuiet reloads the open diff after a poll without marking the panel as loading; the answer
+// still goes through applyDiff, so a late one is dropped by its sequence.
+func (m *Model) loadDiffQuiet(path domain.RelPath) tea.Cmd {
+	request := domain.DiffRequest{Path: path, Staged: m.staged}
+
+	m.request = request
+	m.seqs.diff++
+
+	return loadDiff(m.git, m.seqs.diff, request)
+}
+
+// branchesQuiet reloads the branch list after a poll without marking the panel as loading.
+func (m *Model) branchesQuiet() tea.Cmd {
+	m.seqs.branches++
+
+	return loadBranches(m.git, m.seqs.branches)
+}
+
 func (m *Model) applyStatus(msg statusLoadedMsg) {
 	if msg.seq != m.seqs.status {
 		return // a late answer of a refresh that is no longer relevant
@@ -1113,9 +1222,14 @@ func (m *Model) applyDiff(msg diffLoadedMsg) tea.Cmd {
 	m.loading.diff = false
 	m.errs.diff = msg.err
 	m.request = msg.req
-	m.diff = domain.Diff{}
-	m.resetHunks()
 
+	// A reload that answers the same diff keeps the cursor and the marked hunks of the user, so the
+	// poll never drops a selection while someone is staging by hunks.
+	unchanged := msg.err == nil && m.loaded && m.diff.Equal(msg.diff)
+	if !unchanged {
+		m.diff = domain.Diff{}
+		m.resetHunks()
+	}
 	if msg.err == nil {
 		m.diff = msg.diff
 	}
@@ -1241,6 +1355,23 @@ func loadStatus(git ports.GitService, seq int) tea.Cmd {
 		status, err := git.Status(ctx)
 
 		return statusLoadedMsg{seq: seq, status: status, err: err}
+	}
+}
+
+// pollStatus asks the port for the working tree on behalf of the poller; the epoch travels with the
+// answer so a manual read that lands first is never overwritten.
+func pollStatus(git ports.GitService, seq, epoch int) tea.Cmd {
+	if git == nil {
+		return func() tea.Msg { return pollStatusMsg{seq: seq, epoch: epoch, err: errNoService} }
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+
+		status, err := git.Status(ctx)
+
+		return pollStatusMsg{seq: seq, epoch: epoch, status: status, err: err}
 	}
 }
 
