@@ -164,6 +164,59 @@ func TestIntegrationReadStatus(t *testing.T) {
 	}
 }
 
+func TestIntegrationReadStatusSeesAnExternalEdit(t *testing.T) {
+	r := newRepo(t)
+	r.write("normal.txt", "uno\ndos\n")
+	r.commit("initial commit")
+
+	service := r.service()
+
+	clean, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if clean.HasChanges() {
+		t.Fatalf("files = %v, want a clean tree before the external edit", clean.Files)
+	}
+
+	// The edit happens outside the TUI: another process touches the worktree.
+	r.write("normal.txt", "uno\nDOS\n")
+	r.write("externo.go", "package externo\n")
+
+	changed, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if !changed.HasChanges() {
+		t.Fatal("HasChanges() = false, want the external edit to be visible on the next read")
+	}
+	if clean.Equal(changed) {
+		t.Error("Equal() = true, want the snapshots to differ after an external edit")
+	}
+
+	want := []domain.RelPath{"externo.go", "normal.txt"}
+	got := make([]domain.RelPath, 0, len(changed.Files))
+	for _, file := range changed.Files {
+		got = append(got, file.Path)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("files = %v, want %v", got, want)
+	}
+	if !clean.SameRefs(changed) {
+		t.Error("SameRefs() = false, want a worktree edit not to look like a ref change")
+	}
+
+	// A second identical read must compare equal, so the poll can skip the re-render.
+	again, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v, want nil", err)
+	}
+	if !changed.Equal(again) {
+		t.Error("Equal() = false for two reads of the same tree, want the poll to detect no change")
+	}
+}
+
 func TestIntegrationReadStatusConflict(t *testing.T) {
 	r := newRepo(t)
 	r.write("conflict.txt", "base\n")

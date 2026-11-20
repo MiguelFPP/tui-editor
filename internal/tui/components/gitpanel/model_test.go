@@ -101,7 +101,7 @@ func answers(t *testing.T, m Model, cmd tea.Cmd) Model {
 
 func panelMessage(msg tea.Msg) bool {
 	switch msg.(type) {
-	case statusLoadedMsg, branchesLoadedMsg, stashesLoadedMsg, historyLoadedMsg, diffLoadedMsg, sidesLoadedMsg, writeDoneMsg:
+	case statusLoadedMsg, branchesLoadedMsg, stashesLoadedMsg, historyLoadedMsg, diffLoadedMsg, sidesLoadedMsg, writeDoneMsg, pollStatusMsg:
 		return true
 	default:
 		return false

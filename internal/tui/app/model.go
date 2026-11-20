@@ -662,8 +662,8 @@ func (m *Model) dispatchMouse(msg tea.Msg, panel Focus) tea.Cmd {
 	}
 }
 
-// setTab switches the active tab and hands the focus to its main panel; leaving the Docker tab
-// stops its ticker.
+// setTab switches the active tab and hands the focus to its main panel; leaving the Docker or the
+// Git tab stops its ticker.
 func (m *Model) setTab(tab Tab) tea.Cmd {
 	if tab == m.tab {
 		return nil
@@ -673,11 +673,15 @@ func (m *Model) setTab(tab Tab) tea.Cmd {
 	if m.tab == DockerTab {
 		m.docker.SetActive(false)
 	}
+	if m.tab == GitTab {
+		m.git.SetActive(false)
+	}
 
 	m.tab = tab
 	switch tab {
 	case GitTab:
 		m.focus = FocusGit
+		cmd = m.git.SetActive(true)
 	case DockerTab:
 		m.focus = FocusDocker
 		cmd = m.docker.SetActive(true)

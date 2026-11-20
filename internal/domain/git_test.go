@@ -144,6 +144,77 @@ func TestGitStatusFilters(t *testing.T) {
 	}
 }
 
+func TestGitStatusEqual(t *testing.T) {
+	base := GitStatus{
+		Branch:   "main",
+		Upstream: "origin/main",
+		Ahead:    2,
+		Behind:   1,
+		Files: []GitFileStatus{
+			{Path: "normal.txt", Index: GitUnmodified, Worktree: GitModified},
+			{Path: "new.txt", Index: GitUntracked, Worktree: GitUntracked},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		other GitStatus
+		want  bool
+	}{
+		{name: "identical", other: base, want: true},
+		{name: "empty files", other: GitStatus{Branch: "main", Upstream: "origin/main", Ahead: 2, Behind: 1}, want: false},
+		{name: "other branch", other: func() GitStatus { s := base; s.Branch = "otra"; return s }(), want: false},
+		{name: "other upstream", other: func() GitStatus { s := base; s.Upstream = "origin/otra"; return s }(), want: false},
+		{name: "other ahead", other: func() GitStatus { s := base; s.Ahead = 3; return s }(), want: false},
+		{name: "other behind", other: func() GitStatus { s := base; s.Behind = 0; return s }(), want: false},
+		{name: "detached", other: func() GitStatus { s := base; s.Detached = true; return s }(), want: false},
+		{name: "unborn", other: func() GitStatus { s := base; s.Unborn = true; return s }(), want: false},
+		{name: "truncated", other: func() GitStatus { s := base; s.Truncated = true; return s }(), want: false},
+		{name: "extra file", other: func() GitStatus {
+			s := base
+			s.Files = append(s.Files, GitFileStatus{Path: "otro.txt", Worktree: GitModified})
+
+			return s
+		}(), want: false},
+		{name: "other worktree code", other: func() GitStatus {
+			s := base
+			s.Files = append([]GitFileStatus(nil), base.Files...)
+			s.Files[0].Worktree = GitDeleted
+
+			return s
+		}(), want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := base.Equal(tc.other); got != tc.want {
+				t.Errorf("Equal(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGitStatusSameRefs(t *testing.T) {
+	base := GitStatus{Branch: "main", Upstream: "origin/main", Ahead: 2, Behind: 1}
+
+	worktreeOnly := base
+	worktreeOnly.Files = []GitFileStatus{{Path: "normal.txt", Worktree: GitModified}}
+
+	if !base.SameRefs(worktreeOnly) {
+		t.Error("SameRefs() = false for a worktree edit, want true")
+	}
+	if base.Equal(worktreeOnly) {
+		t.Error("Equal() = true for a worktree edit, want the snapshots to differ")
+	}
+
+	otherBranch := worktreeOnly
+	otherBranch.Branch = "otra"
+
+	if base.SameRefs(otherBranch) {
+		t.Error("SameRefs() = true for another branch, want false")
+	}
+}
+
 func TestStashEntryRef(t *testing.T) {
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	entry := StashEntry{Index: 2, Message: "WIP editor", Branch: "main", Created: created}

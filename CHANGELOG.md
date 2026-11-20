@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `Git` panel now notices changes made outside the TUI, by an external editor
+  or an agentic harness: while the tab is visible it re-reads the working tree
+  once per second instead of only on `r` or on its own writes. The poll marks
+  nothing as loading, so the header and the status bar spinner stay still, and
+  it is dropped when a write is in flight. A read that answers the same snapshot
+  changes nothing, and a failed read never replaces the last good status.
+- The open diff reloads after such a change, and a reload that answers the same
+  diff keeps the cursor and the marked hunks, so staging by hunks is not lost.
+
 ## [0.8.0] - 2026-11-19
 
 Exact highlighting for the side-by-side diff, read from the real content of each
